@@ -1,0 +1,7 @@
+flask
+flask-cors
+yfinance>=0.2.50
+requests
+beautifulsoup4
+gunicorn
+lxml
