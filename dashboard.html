@@ -682,9 +682,9 @@ header {
 
 /* ── BOTTOM NAV (mobile only) ── */
 .bottom-nav { display:none; position:fixed; bottom:0; left:0; right:0; height:50px; background:var(--bg2); border-top:1px solid var(--border); z-index:300; }
-.bottom-nav-inner { display:flex; height:100%; align-items:center; width:100%; }
+.bottom-nav-inner { display:flex; height:100%; align-items:center; }
 /* each tab is equal flex, icon only, no labels */
-.bn-item { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; cursor:pointer; border:none; background:none; padding:0; -webkit-tap-highlight-color:transparent; position:relative; }
+.bn-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; cursor:pointer; border:none; background:none; padding:0; -webkit-tap-highlight-color:transparent; position:relative; }
 .bn-item svg { width:24px; height:24px; }
 .bn-item:active { opacity:0.55; }
 /* inactive icons = thin outline stroke */
@@ -735,10 +735,10 @@ header {
   /* Header compact */
   header { height: 46px !important; padding: 0 8px !important; gap: 4px !important; }
   .logo-mark { width: 26px !important; height: 26px !important; }
-  .logo-wordmark { font-size: 18px !important; letter-spacing: 2.5px !important; }
+  .logo-wordmark { font-size: 13px !important; letter-spacing: 1px !important; }
   .logo-tag { display: none !important; }
   .nav-tab { display: none !important; }
-  .header-search { display: none !important; }
+  .header-search { max-width: 120px !important; }
   .notif-btn { width: 28px !important; height: 28px !important; }
 
   /* Eyes banner — hide on mobile, wastes space */
@@ -1989,7 +1989,7 @@ header {
     </button>
 
     <!-- 2. Search -->
-    <button class="bn-item" id="bn-search" onclick="openMobileSearch()" aria-label="Search">
+    <button class="bn-item" id="bn-screener" onclick="switchTabMobile(this,'screener')" aria-label="Screener">
       <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
       <svg class="ic-filled" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
     </button>
@@ -12399,22 +12399,22 @@ function renderHeatmap() {
 
 const STORY_SUBJECTS = [
   // NSE Stocks
-  {id:'RELIANCE',  label:'Reliance',  emoji:'🛢️',  type:'stock', yf:'RELIANCE.NS'},
-  {id:'TCS',       label:'TCS',       emoji:'💻',  type:'stock', yf:'TCS.NS'},
-  {id:'HDFCBANK',  label:'HDFC Bank', emoji:'🏦',  type:'stock', yf:'HDFCBANK.NS'},
-  {id:'INFY',      label:'Infosys',   emoji:'🖥️',  type:'stock', yf:'INFY.NS'},
-  {id:'SBIN',      label:'SBI',       emoji:'🏛️',  type:'stock', yf:'SBIN.NS'},
-  {id:'TATAMOTORS',label:'Tata Motors',emoji:'🚗', type:'stock', yf:'TATAMOTORS.NS'},
-  {id:'ADANIENT',  label:'Adani',     emoji:'⚡',  type:'stock', yf:'ADANIENT.NS'},
-  {id:'ZOMATO',    label:'Zomato',    emoji:'🍱',  type:'stock', yf:'ZOMATO.NS'},
+  {id:'RELIANCE',   label:'Reliance',   emoji:'🛢️', type:'stock',     yf:'RELIANCE.NS',  newsQ:'Reliance Industries RIL NSE stock today'},
+  {id:'TCS',        label:'TCS',        emoji:'💻', type:'stock',     yf:'TCS.NS',        newsQ:'TCS Tata Consultancy Services stock NSE today'},
+  {id:'HDFCBANK',   label:'HDFC Bank',  emoji:'🏦', type:'stock',     yf:'HDFCBANK.NS',   newsQ:'HDFC Bank stock NSE India today'},
+  {id:'INFY',       label:'Infosys',    emoji:'🖥️', type:'stock',     yf:'INFY.NS',       newsQ:'Infosys INFY stock NSE today'},
+  {id:'SBIN',       label:'SBI',        emoji:'🏛️', type:'stock',     yf:'SBIN.NS',       newsQ:'SBI State Bank India stock NSE today'},
+  {id:'TATAMOTORS', label:'Tata Motors',emoji:'🚗', type:'stock',     yf:'TATAMOTORS.NS', newsQ:'Tata Motors stock EV NSE India today'},
+  {id:'ADANIENT',   label:'Adani',      emoji:'⚡', type:'stock',     yf:'ADANIENT.NS',   newsQ:'Adani Enterprises stock NSE India today'},
+  {id:'ZOMATO',     label:'Zomato',     emoji:'🍱', type:'stock',     yf:'ZOMATO.NS',     newsQ:'Zomato stock NSE India today'},
   // Crypto
-  {id:'BTC',       label:'Bitcoin',   emoji:'₿',   type:'crypto', cg:'bitcoin'},
-  {id:'ETH',       label:'Ethereum',  emoji:'💎',  type:'crypto', cg:'ethereum'},
-  {id:'SOL',       label:'Solana',    emoji:'☀️',  type:'crypto', cg:'solana'},
+  {id:'BTC',        label:'Bitcoin',    emoji:'₿',  type:'crypto',    cg:'bitcoin',       newsQ:'Bitcoin BTC price news today'},
+  {id:'ETH',        label:'Ethereum',   emoji:'💎', type:'crypto',    cg:'ethereum',      newsQ:'Ethereum ETH price news today'},
+  {id:'SOL',        label:'Solana',     emoji:'☀️', type:'crypto',    cg:'solana',        newsQ:'Solana SOL crypto price today'},
   // Commodities
-  {id:'GOLD',      label:'Gold',      emoji:'🥇',  type:'commodity', yf:'GC=F'},
-  {id:'CRUDE',     label:'Crude Oil', emoji:'🛢️',  type:'commodity', yf:'CL=F'},
-  {id:'SILVER',    label:'Silver',    emoji:'🪙',  type:'commodity', yf:'SI=F'},
+  {id:'GOLD',       label:'Gold',       emoji:'🥇', type:'commodity', yf:'GC=F',          newsQ:'gold price MCX India today'},
+  {id:'CRUDE',      label:'Crude Oil',  emoji:'🛢️', type:'commodity', yf:'CL=F',          newsQ:'crude oil WTI price today'},
+  {id:'SILVER',     label:'Silver',     emoji:'🪙', type:'commodity', yf:'SI=F',          newsQ:'silver price MCX India today'},
 ];
 
 let _stories = {};          // {id: {price, chg, up, news, ts}}
@@ -12448,44 +12448,82 @@ async function buildStories() {
     }
   });
 
-  // Fetch news headlines for each subject via rss2json
+  // Fetch news for each story subject — rss2json first, proxy fallback
   await Promise.allSettled(STORY_SUBJECTS.map(async subj => {
     try {
-      const q   = encodeURIComponent(subj.label + ' stock market India');
-      const rss = encodeURIComponent('https://news.google.com/rss/search?q=' + q + '&hl=en-IN&gl=IN&ceid=IN:en');
-      const _rssRaw = 'https://news.google.com/rss/search?q=' + encodeURIComponent(subj.label + ' stock market India') + '&hl=en-IN&gl=IN&ceid=IN:en';
-      const _rssProxies = [
-        'https://api.allorigins.win/get?url=' + encodeURIComponent(_rssRaw),
-        'https://corsproxy.io/?' + encodeURIComponent(_rssRaw),
-      ];
-      let j = null;
-      for (const _px of _rssProxies) {
-        try {
-          const _pr = await fetch(_px, {signal: AbortSignal.timeout(7000)});
-          if (!_pr.ok) continue;
-          const _raw = await _pr.json();
-          const _xml = new DOMParser().parseFromString(_raw.contents || '', 'text/xml');
-          const _items = Array.from(_xml.querySelectorAll('item')).slice(0, 3).map(el => ({
-            title: el.querySelector('title')?.textContent || '',
-            link:  el.querySelector('link')?.textContent || '#',
-            pubDate: el.querySelector('pubDate')?.textContent || '',
-            author: el.querySelector('source')?.textContent || 'Google News',
-          })).filter(i => i.title.length > 5);
-          if (_items.length) { j = { status: 'ok', items: _items }; break; }
-        } catch(e) { continue; }
-      }
-      const r = { ok: !!j };
-      if (r.ok) {
-        if (j.status === 'ok' && j.items?.length) {
-          if (!_stories[subj.id]) _stories[subj.id] = {};
-          _stories[subj.id].news = j.items.slice(0, 3).map(i => ({
-            title: i.title || '',
-            link:  i.link  || '#',
-            ago:   timeAgo(i.pubDate || ''),
-            src:   j.feed?.title || 'Google News',
-          })).filter(n => n.title.length > 10);
+      const q = subj.newsQ || (subj.label + ' stock market India today');
+      const rssUrl = 'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-IN&gl=IN&ceid=IN:en';
+
+      // Helper to map rss2json response to our format
+      const mapItems = (j) => (j.items || []).slice(0, 3).map(i => ({
+        title: (i.title || '').trim(),
+        link:  i.link || '#',
+        ago:   typeof timeAgo === 'function' ? timeAgo(i.pubDate || '') : '',
+        src:   (j.feed?.title || i.author || 'Google News').replace(/ - .*$/, '').slice(0, 35),
+      })).filter(n => n.title.length > 10);
+
+      // Strategy 1: rss2json — no CORS, works everywhere
+      try {
+        const api = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(rssUrl) + '&count=3';
+        const r2 = await fetch(api, { signal: AbortSignal.timeout(10000) });
+        if (r2.ok) {
+          const j2 = await r2.json();
+          if (j2.status === 'ok' && j2.items?.length) {
+            const mapped = mapItems(j2);
+            if (mapped.length) {
+              if (!_stories[subj.id]) _stories[subj.id] = {};
+              _stories[subj.id].news = mapped;
+              return;
+            }
+          }
         }
-      }
+      } catch(e) {}
+
+      // Strategy 2: allorigins proxy → raw RSS XML
+      try {
+        const px = 'https://api.allorigins.win/get?url=' + encodeURIComponent(rssUrl);
+        const pr = await fetch(px, { signal: AbortSignal.timeout(8000) });
+        if (pr.ok) {
+          const raw = await pr.json();
+          const xmlStr = raw?.contents || '';
+          if (xmlStr.includes('<item>')) {
+            const xml = new DOMParser().parseFromString(xmlStr, 'text/xml');
+            const items = Array.from(xml.querySelectorAll('item')).slice(0, 3).map(el => ({
+              title: el.querySelector('title')?.textContent?.trim() || '',
+              link:  el.querySelector('link')?.textContent?.trim() || '#',
+              ago:   typeof timeAgo === 'function' ? timeAgo(el.querySelector('pubDate')?.textContent || '') : '',
+              src:   el.querySelector('source')?.textContent?.trim() || 'Google News',
+            })).filter(i => i.title.length > 10);
+            if (items.length) {
+              if (!_stories[subj.id]) _stories[subj.id] = {};
+              _stories[subj.id].news = items;
+              return;
+            }
+          }
+        }
+      } catch(e) {}
+
+      // Strategy 3: corsproxy fallback
+      try {
+        const px2 = 'https://corsproxy.io/?' + encodeURIComponent(rssUrl);
+        const pr2 = await fetch(px2, { signal: AbortSignal.timeout(8000) });
+        if (pr2.ok) {
+          const xmlStr2 = await pr2.text();
+          if (xmlStr2.includes('<item>')) {
+            const xml2 = new DOMParser().parseFromString(xmlStr2, 'text/xml');
+            const items2 = Array.from(xml2.querySelectorAll('item')).slice(0, 3).map(el => ({
+              title: el.querySelector('title')?.textContent?.trim() || '',
+              link:  el.querySelector('link')?.textContent?.trim() || '#',
+              ago:   typeof timeAgo === 'function' ? timeAgo(el.querySelector('pubDate')?.textContent || '') : '',
+              src:   el.querySelector('source')?.textContent?.trim() || 'Google News',
+            })).filter(i => i.title.length > 10);
+            if (items2.length) {
+              if (!_stories[subj.id]) _stories[subj.id] = {};
+              _stories[subj.id].news = items2;
+            }
+          }
+        }
+      } catch(e) {}
     } catch(e) {}
   }));
 
@@ -13558,110 +13596,5 @@ setInterval(_syncMobileTrending, 30000);
   };
 })();
 </script>
-<!-- ══ MOBILE SEARCH OVERLAY (mobile only) ══ -->
-<div id="mpMobSearch" onclick="if(event.target===this)closeMobileSearch()"
-  style="display:none;position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding-top:56px;">
-  <div style="width:calc(100% - 24px);max-width:500px;background:var(--bg2);border:1px solid var(--border2);border-radius:16px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.4);" onclick="event.stopPropagation()">
-    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
-      <input id="mpMobSearchInput" type="search" autocomplete="off" autocorrect="off" spellcheck="false"
-        placeholder="Search posts, people, stocks…"
-        style="flex:1;border:none;background:transparent;color:var(--text);font-size:15px;font-family:'DM Sans',sans-serif;outline:none;"
-        oninput="mpMobSearchRun(this.value)"
-        onkeydown="if(event.key==='Escape')closeMobileSearch()">
-      <button onclick="closeMobileSearch()" style="border:none;background:none;cursor:pointer;color:var(--text3);font-size:20px;line-height:1;padding:0 4px;">✕</button>
-    </div>
-    <div id="mpMobSearchResults" style="max-height:60vh;overflow-y:auto;">
-      <div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>
-    </div>
-  </div>
-</div>
-
-<script>
-(function(){
-  function openMobileSearch() {
-    const el = document.getElementById('mpMobSearch');
-    if (!el) return;
-    el.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-    document.querySelectorAll('.bn-item').forEach(b => b.classList.remove('active'));
-    const btn = document.getElementById('bn-search');
-    if (btn) btn.classList.add('active');
-    setTimeout(() => { const i = document.getElementById('mpMobSearchInput'); if (i) i.focus(); }, 60);
-  }
-  function closeMobileSearch() {
-    const el = document.getElementById('mpMobSearch');
-    if (el) el.style.display = 'none';
-    document.body.style.overflow = '';
-    const i = document.getElementById('mpMobSearchInput');
-    if (i) i.value = '';
-    const r = document.getElementById('mpMobSearchResults');
-    if (r) r.innerHTML = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>';
-    const btn = document.getElementById('bn-search');
-    if (btn) btn.classList.remove('active');
-  }
-  function mpMobSearchRun(q) {
-    const r = document.getElementById('mpMobSearchResults');
-    if (!r) return;
-    const ql = (q || '').trim().toLowerCase();
-    if (!ql) { r.innerHTML = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>'; return; }
-    let html = '';
-    // People
-    const posts = (typeof getPosts === 'function') ? getPosts() : [];
-    const people = [...new Set(posts.map(p => p.author).filter(Boolean))].filter(a => a.toLowerCase().includes(ql)).slice(0, 4);
-    if (people.length) {
-      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">PEOPLE</div>';
-      people.forEach(name => {
-        html += `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
-          onclick="closeMobileSearch();if(typeof openUserProfile==='function')openUserProfile('${name.replace(/'/g,"\\'")}');" onmousedown="event.preventDefault()">
-          <div style="width:36px;height:36px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0;">${name.slice(0,2).toUpperCase()}</div>
-          <div><div style="font-size:14px;font-weight:700;color:var(--text);">${name}</div><div style="font-size:11px;color:var(--text3);">@${name.toLowerCase().replace(/\s+/g,'')}</div></div>
-        </div>`;
-      });
-    }
-    // Posts
-    const matchedPosts = posts.filter(p => p.text && p.text.toLowerCase().includes(ql)).slice(0, 5);
-    if (matchedPosts.length) {
-      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">POSTS</div>';
-      matchedPosts.forEach(p => {
-        const snippet = (p.text || '').slice(0, 100) + (p.text && p.text.length > 100 ? '…' : '');
-        const safe = ql.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-        const hi = snippet.replace(new RegExp('(' + safe + ')', 'gi'), '<mark style="background:var(--accent);color:#fff;border-radius:2px;padding:0 2px;">$1</mark>');
-        html += `<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
-          onclick="closeMobileSearch();switchTabMobile(document.getElementById('bn-feed'),'feed');setTimeout(()=>{const el=document.getElementById('post-${p.id}');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});},400);" onmousedown="event.preventDefault()">
-          <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:3px;">@${p.author||'Unknown'}</div>
-          <div style="font-size:13px;color:var(--text);line-height:1.4;">${hi}</div>
-        </div>`;
-      });
-    }
-    // Stocks / Crypto / Commodities
-    const stockList  = (typeof allStockSymbols !== 'undefined') ? allStockSymbols : [];
-    const cryptoList = (typeof CRYPTO_LIST !== 'undefined') ? CRYPTO_LIST : [];
-    const commList   = (typeof COMM_LIST !== 'undefined') ? COMM_LIST : [];
-    const instruments = [
-      ...stockList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,4),
-      ...cryptoList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,2),
-      ...commList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,2),
-    ].slice(0,6);
-    if (instruments.length) {
-      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">STOCKS & MARKETS</div>';
-      instruments.forEach(s => {
-        const bc = s.bc || 'var(--accent)';
-        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
-          onclick="closeMobileSearch();if(typeof openStockModal==='function')openStockModal('${s.sym}','${(s.name||s.sym).replace(/'/g,"\\'")}');" onmousedown="event.preventDefault()">
-          <div><div style="font-family:Space Mono,monospace;font-size:12px;font-weight:700;color:var(--text);">${s.sym}</div><div style="font-size:11px;color:var(--text3);">${s.name||''}</div></div>
-          <span style="font-size:9px;color:${bc};border:1px solid ${bc}44;border-radius:4px;padding:2px 6px;">${s.badge||''}</span>
-        </div>`;
-      });
-    }
-    if (!html) html = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">No results for "<strong>' + ql + '</strong>"</div>';
-    r.innerHTML = html;
-  }
-  window.openMobileSearch  = openMobileSearch;
-  window.closeMobileSearch = closeMobileSearch;
-  window.mpMobSearchRun    = mpMobSearchRun;
-})();
-</script>
-
 </body>
 </html>

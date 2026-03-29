@@ -8261,61 +8261,16 @@ document.addEventListener('visibilitychange', () => {
     tickClock(); // immediate update on tab focus
   }
 });
-// ── NEWS (multi-source with rss2json primary + proxy fallbacks) ──
+// ── NEWS ──
 let _newsLoaded = {};
-
-const NEWS_QUERIES = {
-  markets:     'indian stock market nifty sensex today',
-  stocks:      'NSE BSE india stocks today',
-  economy:     'india economy RBI inflation today',
-  crypto:      'bitcoin ethereum crypto cryptocurrency today',
-  commodities: 'gold price crude oil silver india today',
-};
 
 const NEWS_RSS_URLS = {
   markets:     'https://news.google.com/rss/search?q=indian+stock+market+nifty+sensex&hl=en-IN&gl=IN&ceid=IN:en',
-  stocks:      'https://news.google.com/rss/search?q=NSE+BSE+india+stocks&hl=en-IN&gl=IN&ceid=IN:en',
-  economy:     'https://news.google.com/rss/search?q=india+economy+RBI+inflation&hl=en-IN&gl=IN&ceid=IN:en',
-  crypto:      'https://news.google.com/rss/search?q=bitcoin+crypto+cryptocurrency+today&hl=en-IN&gl=IN&ceid=IN:en',
+  stocks:      'https://news.google.com/rss/search?q=NSE+BSE+india+stocks+today&hl=en-IN&gl=IN&ceid=IN:en',
+  economy:     'https://news.google.com/rss/search?q=india+economy+RBI+inflation+today&hl=en-IN&gl=IN&ceid=IN:en',
+  crypto:      'https://news.google.com/rss/search?q=bitcoin+ethereum+crypto+today&hl=en-IN&gl=IN&ceid=IN:en',
   commodities: 'https://news.google.com/rss/search?q=gold+price+crude+oil+india+today&hl=en-IN&gl=IN&ceid=IN:en',
 };
-
-// Multiple CORS proxies — tries each in order until one works
-const CORS_PROXIES = [
-  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  url => `https://thingproxy.freeboard.io/fetch/${encodeURIComponent(url)}`,
-];
-
-// rss2json — best CORS-free option, 1000 free calls/day
-async function fetchViaRss2Json(rssUrl) {
-  const api = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(rssUrl) + '&count=16';
-  const r = await fetch(api, { signal: AbortSignal.timeout(10000) });
-  if (!r.ok) return null;
-  const j = await r.json();
-  if (j.status !== 'ok' || !j.items?.length) return null;
-  return j.items.map(i => ({
-    title:  (i.title || '').trim(),
-    link:   i.link || '#',
-    date:   i.pubDate || '',
-    source: (j.feed?.title || i.author || 'Google News').replace(/ - .*$/, ''),
-    ago:    timeAgo(i.pubDate || ''),
-  })).filter(i => i.title.length > 8);
-}
-
-async function fetchViaProxy(url) {
-  for (const makeProxyUrl of CORS_PROXIES) {
-    try {
-      const proxyUrl = makeProxyUrl(url);
-      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) continue;
-      const text = proxyUrl.includes('allorigins') ? (await res.json()).contents : await res.text();
-      if (text && text.includes('<item>')) return text;
-    } catch(e) { continue; }
-  }
-  return null;
-}
 
 function timeAgo(dateStr) {
   if (!dateStr) return '';
@@ -8328,90 +8283,86 @@ function timeAgo(dateStr) {
   return Math.floor(h/24) + 'd ago';
 }
 
-const parseRSSText = (text) => {
-  const parser = new DOMParser();
-  const xml = parser.parseFromString(text, 'text/xml');
-  return Array.from(xml.querySelectorAll('item')).slice(0,16).map(el => ({
+// Parse raw RSS XML text into item array
+function _parseRSSText(text) {
+  const xml = new DOMParser().parseFromString(text, 'text/xml');
+  return Array.from(xml.querySelectorAll('item')).slice(0, 16).map(el => ({
     title:  el.querySelector('title')?.textContent?.trim() || '',
     link:   el.querySelector('link')?.textContent?.trim()  || '#',
     date:   el.querySelector('pubDate')?.textContent?.trim() || '',
     source: el.querySelector('source')?.textContent?.trim() || 'Google News',
     ago:    timeAgo(el.querySelector('pubDate')?.textContent || ''),
   })).filter(i => i.title.length > 8);
-};
+}
+
+// rss2json.com — no CORS, returns clean JSON, 1000 free req/day
+async function _fetchRss2Json(rssUrl, count) {
+  count = count || 16;
+  const api = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(rssUrl) + '&count=' + count;
+  const r = await fetch(api, { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) return null;
+  const j = await r.json();
+  if (j.status !== 'ok' || !j.items?.length) return null;
+  return j.items.map(i => ({
+    title:  (i.title || '').trim(),
+    link:   i.link || '#',
+    date:   i.pubDate || '',
+    source: (j.feed?.title || i.author || 'Google News').replace(/ - .*$/, '').slice(0, 40),
+    ago:    timeAgo(i.pubDate || ''),
+  })).filter(i => i.title.length > 8);
+}
+
+// Raw RSS via proxy fallbacks
+async function _fetchRssViaProxy(rssUrl) {
+  const proxies = [
+    () => fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(rssUrl), { signal: AbortSignal.timeout(9000) }).then(r => r.json()).then(j => j.contents || ''),
+    () => fetch('https://corsproxy.io/?' + encodeURIComponent(rssUrl), { signal: AbortSignal.timeout(9000) }).then(r => r.text()),
+    () => fetch('https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(rssUrl), { signal: AbortSignal.timeout(9000) }).then(r => r.text()),
+  ];
+  for (const pfn of proxies) {
+    try {
+      const text = await pfn();
+      if (text && text.includes('<item>')) return _parseRSSText(text);
+    } catch(e) { continue; }
+  }
+  return null;
+}
 
 async function loadNews(cat, btn) {
   document.querySelectorAll('#newsCatBtns button').forEach(b => {
     b.style.borderColor='var(--border)'; b.style.background='transparent'; b.style.color='var(--text3)';
   });
-  if(btn){ btn.style.borderColor='var(--accent)'; btn.style.background='rgba(0,112,243,0.1)'; btn.style.color='var(--accent)'; }
+  if (btn) { btn.style.borderColor='var(--accent)'; btn.style.background='rgba(0,112,243,0.1)'; btn.style.color='var(--accent)'; }
   const container = document.getElementById('newsContainer');
-  if(!container) return;
+  if (!container) return;
 
-  // Cache: 5 min
-  if(_newsLoaded[cat] && Date.now()-_newsLoaded[cat].ts < 300000){ renderNews(_newsLoaded[cat].items); return; }
+  // Cache 5 min
+  if (_newsLoaded[cat] && Date.now() - _newsLoaded[cat].ts < 300000) { renderNews(_newsLoaded[cat].items); return; }
   container.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div class="loading-spin"></div><div style="margin-top:12px;font-size:12px;">Fetching latest news…</div></div>';
 
   const rssUrl = NEWS_RSS_URLS[cat] || NEWS_RSS_URLS.markets;
 
-  // Strategy 1: rss2json (best — no CORS, parsed JSON, fast)
+  // Strategy 1: rss2json (best — no CORS, fast, reliable)
   try {
-    const items = await fetchViaRss2Json(rssUrl);
-    if (items && items.length) {
-      _newsLoaded[cat] = { ts: Date.now(), items };
-      renderNews(items);
-      return;
-    }
+    const items = await _fetchRss2Json(rssUrl, 16);
+    if (items && items.length) { _newsLoaded[cat] = { ts: Date.now(), items }; renderNews(items); return; }
   } catch(e) {}
 
   // Strategy 2: raw RSS via CORS proxies
   try {
-    const rawXml = await fetchViaProxy(rssUrl);
-    if (rawXml) {
-      const items = parseRSSText(rawXml);
-      if (items.length) {
-        _newsLoaded[cat] = { ts: Date.now(), items };
-        renderNews(items);
-        return;
-      }
-    }
+    const items = await _fetchRssViaProxy(rssUrl);
+    if (items && items.length) { _newsLoaded[cat] = { ts: Date.now(), items }; renderNews(items); return; }
   } catch(e) {}
 
-  // Strategy 3: server-side /api/news endpoint (if deployed on Node/Vercel)
-  try {
-    const r = await fetch('/api/news?cat='+encodeURIComponent(cat), { signal: AbortSignal.timeout(10000) });
-    if (r.ok) {
-      const j = await r.json();
-      if (j.items?.length) {
-        const items = j.items.map(i => ({
-          title: i.title || '', link: i.link || '#',
-          date: i.date || '', source: i.source || 'News',
-          ago: timeAgo(i.date || ''),
-        })).filter(i => i.title.length > 8);
-        if (items.length) { _newsLoaded[cat] = { ts: Date.now(), items }; renderNews(items); return; }
-      }
-    }
-  } catch(e) {}
-
-  // All failed — show retry
-  window._mpNewsRetry = ()=>{ delete _newsLoaded[cat]; loadNews(cat,btn); };
+  // All failed
+  window._mpNewsRetry = () => { delete _newsLoaded[cat]; loadNews(cat, btn); };
   container.innerHTML = '<div style="text-align:center;padding:48px;">'
-    +'<div style="font-size:32px;margin-bottom:12px;">📡</div>'
-    +'<div style="font-size:14px;color:var(--text2);font-weight:600;">Could not load news</div>'
-    +'<div style="font-size:12px;color:var(--text3);margin-top:6px;margin-bottom:16px;">Check your connection and try again.</div>'
-    +'<button onclick="_mpNewsRetry()" style="padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">🔄 Retry</button>'
-    +'</div>';
+    + '<div style="font-size:32px;margin-bottom:12px;">📡</div>'
+    + '<div style="font-size:14px;color:var(--text2);font-weight:600;">Could not load news</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-top:6px;margin-bottom:16px;">Check your connection and try again.</div>'
+    + '<button onclick="_mpNewsRetry()" style="padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">🔄 Retry</button>'
+    + '</div>';
 }
-
-// Auto-refresh news every 5 minutes if news page is open
-setInterval(() => {
-  if (window._activePage === 'news') {
-    const activeBtn = document.querySelector('#newsCatBtns button[style*="accent"]');
-    const cat = activeBtn?.dataset?.cat || 'markets';
-    delete _newsLoaded[cat];
-    loadNews(cat, activeBtn);
-  }
-}, 5 * 60 * 1000);
 
 
 function renderNews(items) {
