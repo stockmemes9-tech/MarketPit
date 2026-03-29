@@ -2516,43 +2516,96 @@ const YF_STOCK_MAP = {
 };
 
 // ── LIVE FETCH FUNCTIONS ──────────────────────────────────────
+// Works from ANY static host (GitHub Pages, Netlify, etc.) — no backend needed
 
-// Fetch one stock/index/commodity via Yahoo Finance — tries multiple proxies
+// CORS proxy wrappers — tried in order on failure
+const _PROXY_WRAP = [
+  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${url}`,
+];
+
+// Parse a raw YF chart v8 response
+function _parseYFChart(raw) {
+  let parsed;
+  try { const w = JSON.parse(raw); parsed = w.contents ? JSON.parse(w.contents) : w; }
+  catch(e) { try { parsed = JSON.parse(raw); } catch(e2) { return null; } }
+  const meta = parsed?.chart?.result?.[0]?.meta;
+  if (!meta?.regularMarketPrice) return null;
+  const price = meta.regularMarketPrice;
+  const prev  = meta.previousClose || meta.chartPreviousClose || meta.regularMarketPreviousClose || meta.regularMarketOpen || price;
+  const chg   = prev ? ((price - prev) / prev * 100) : 0;
+  return { price, prev, chg, up: chg >= 0 };
+}
+
+// Fetch ONE symbol via v8 chart — tries direct then proxies
 async function yfFetch(yfSym) {
-  // ── Primary: Vercel serverless /api/quote (server-side, no CORS, fast) ──
-  try {
-    const r = await fetch(`/api/quote?symbols=${encodeURIComponent(yfSym)}`, { signal: AbortSignal.timeout(10000) });
-    if (r.ok) {
-      const j = await r.json();
-      const q = j?.quoteResponse?.result?.[0];
-      if (q?.regularMarketPrice) {
-        const price = q.regularMarketPrice;
-        const prev  = q.regularMarketPreviousClose || price;
-        const chg   = prev ? ((price - prev) / prev * 100) : 0;
-        return { price, prev, chg, up: chg >= 0 };
-      }
-    }
-  } catch(e) {}
-
-  // ── Fallback: browser proxies ──
-  const url = `${YF_BASE}${yfSym}?interval=1m&range=1d`;
-  for (const proxyFn of YF_PROXIES) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yfSym}?interval=1m&range=1d`;
+  // Try direct (works in some environments)
+  for (const base of ['query1','query2']) {
     try {
-      const r = await fetch(proxyFn(url), { signal: AbortSignal.timeout(8000) });
+      const r = await fetch(`https://${base}.finance.yahoo.com/v8/finance/chart/${yfSym}?interval=1m&range=1d`, { signal: AbortSignal.timeout(6000) });
+      if (r.ok) { const res = _parseYFChart(await r.text()); if (res) return res; }
+    } catch(e) {}
+  }
+  // Proxy fallback
+  for (const proxyFn of _PROXY_WRAP) {
+    try {
+      const r = await fetch(proxyFn(url), { signal: AbortSignal.timeout(9000) });
       if (!r.ok) continue;
-      const raw = await r.text();
-      let parsed;
-      try { const w = JSON.parse(raw); parsed = w.contents ? JSON.parse(w.contents) : w; }
-      catch(e) { parsed = JSON.parse(raw); }
-      const meta = parsed?.chart?.result?.[0]?.meta;
-      if (!meta?.regularMarketPrice) continue;
-      const price = meta.regularMarketPrice;
-      const prev  = meta.previousClose || meta.chartPreviousClose || meta.regularMarketOpen || price;
-      const chg   = prev ? ((price - prev) / prev * 100) : 0;
-      return { price, prev, chg, up: chg >= 0 };
+      const res = _parseYFChart(await r.text());
+      if (res) return res;
     } catch(e) { continue; }
   }
   throw new Error('all YF sources failed for ' + yfSym);
+}
+
+// Batch-fetch multiple YF symbols at once via v7/finance/quote
+// Returns Map<yfSym, {price, prev, chg, up}>
+async function yfBatchFetch(yfSyms) {
+  if (!yfSyms || !yfSyms.length) return new Map();
+  const result  = new Map();
+  const symsStr = yfSyms.join(',');
+  const v7url   = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symsStr)}&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent`;
+
+  function _parseV7(raw) {
+    let parsed;
+    try { const w = JSON.parse(raw); parsed = w.contents ? JSON.parse(w.contents) : w; }
+    catch(e) { try { parsed = JSON.parse(raw); } catch(e2) { return 0; } }
+    const quotes = parsed?.quoteResponse?.result || [];
+    let count = 0;
+    quotes.forEach(q => {
+      if (!q?.regularMarketPrice) return;
+      const price  = q.regularMarketPrice;
+      const prev   = q.regularMarketPreviousClose || price;
+      const chgPct = q.regularMarketChangePercent != null ? q.regularMarketChangePercent : ((price-prev)/(prev||1)*100);
+      result.set(q.symbol, { price, prev, chg: chgPct, up: chgPct >= 0 });
+      count++;
+    });
+    return count;
+  }
+
+  // Try direct v7 (both query1 and query2)
+  for (const base of ['query1','query2']) {
+    try {
+      const r = await fetch(`https://${base}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symsStr)}&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent`, { signal: AbortSignal.timeout(7000) });
+      if (r.ok && _parseV7(await r.text()) > 0) return result;
+    } catch(e) {}
+  }
+  // Proxy the v7 URL
+  for (const proxyFn of _PROXY_WRAP) {
+    try {
+      const r = await fetch(proxyFn(v7url), { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) continue;
+      if (_parseV7(await r.text()) > 0) return result;
+    } catch(e) { continue; }
+  }
+  // Last resort: one-by-one chart fetches
+  await Promise.allSettled(yfSyms.map(async sym => {
+    try { const res = await yfFetch(sym); if (res) result.set(sym, res); } catch(e) {}
+  }));
+  return result;
 }
 
 // Fetch crypto prices from CoinGecko (free, no key, very reliable)
@@ -2704,73 +2757,53 @@ const PRIORITY_SYMS = [
   'ASIANPAINT','MARUTI','SUNPHARMA','KOTAKBANK','HCLTECH','LT'
 ];
 
-// Fetch priority stocks immediately on load via single batch call
+// Fetch priority stocks immediately on load via batch
 async function fetchPriorityStocks() {
-  const yfSyms = PRIORITY_SYMS.map(s => YF_STOCK_MAP[s]).filter(Boolean).join(',');
+  const yfSyms = PRIORITY_SYMS.map(s => YF_STOCK_MAP[s]).filter(Boolean);
   try {
-    const r = await fetch((_isLocalFile ? 'https://web-production-78fc1.up.railway.app' : '') + '/api/quote?symbols=' + encodeURIComponent(yfSyms), { signal: AbortSignal.timeout(12000) });
-    if (r.ok) {
-      const j = await r.json();
-      let updated = 0;
-      (j?.quoteResponse?.result || []).forEach(q => {
-        if (!q?.regularMarketPrice) return;
-        const sym = Object.keys(YF_STOCK_MAP).find(k => YF_STOCK_MAP[k] === q.symbol);
-        if (!sym) return;
-        const price  = q.regularMarketPrice;
-        const prev   = q.regularMarketPreviousClose || price;
-        const chgNum = q.regularMarketChangePercent != null ? q.regularMarketChangePercent : ((price-prev)/(prev||1)*100);
-        const chgStr = (chgNum>=0?'+':'') + chgNum.toFixed(2) + '%';
-        const s = liveStocks.find(x => x.sym === sym);
-        if (s) { s.price = price; s.chg = chgStr; s.up = chgNum>=0; s._live = true; updated++; }
-      });
-      if (updated > 0) {
-        const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
-        setLiveStatus('live', '● LIVE · ' + ts + ' IST');
-        window._hasLiveData = true;
-        renderTrending(liveStocks);
-        updateWhatsMoving();
-        updateTickerFromLive();
-        onLiveDataUpdate();
-      }
+    const map = await yfBatchFetch(yfSyms);
+    let updated = 0;
+    map.forEach((data, yfSym) => {
+      const sym = Object.keys(YF_STOCK_MAP).find(k => YF_STOCK_MAP[k] === yfSym);
+      if (!sym) return;
+      const chgStr = (data.chg>=0?'+':'') + data.chg.toFixed(2) + '%';
+      const s = liveStocks.find(x => x.sym === sym);
+      if (s) { s.price = data.price; s.chg = chgStr; s.up = data.up; s._live = true; updated++; }
+    });
+    if (updated > 0) {
+      const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
+      setLiveStatus('live', '● LIVE · ' + ts + ' IST');
+      window._hasLiveData = true;
+      renderTrending(liveStocks);
+      updateWhatsMoving();
+      updateTickerFromLive();
+      onLiveDataUpdate();
     }
   } catch(e) {}
 }
 
 // ── BATCH FETCH ALL NSE STOCKS FOR MARKET MOVERS ──
-// Uses Vercel /api/quote — server-side Yahoo Finance, no CORS issues
 async function _fetchAllMovers() {
-  // Only NSE stocks — filter out indices (%5E...) and commodities (GC=F etc)
   const allSyms = Object.entries(YF_STOCK_MAP).filter(([k,v]) => v.endsWith('.NS'));
   const BATCH = 50;
-
   for (let i = 0; i < allSyms.length; i += BATCH) {
     const batch  = allSyms.slice(i, i + BATCH);
-    const yfSyms = batch.map(([,yf]) => yf).join(',');
+    const yfSyms = batch.map(([,yf]) => yf);
     try {
-      const r = await fetch((_isLocalFile ? 'https://web-production-78fc1.up.railway.app' : '') + '/api/quote?symbols=' + encodeURIComponent(yfSyms),
-        { signal: AbortSignal.timeout(15000) });
-      if (!r.ok) continue;
-      const j = await r.json();
-      (j?.quoteResponse?.result || []).forEach(q => {
-        if (!q?.regularMarketPrice) return;
-        const nseEntry = batch.find(([,yf]) => yf === q.symbol);
-        if (!nseEntry) return;
-        const sym    = nseEntry[0];
-        const price  = q.regularMarketPrice;
-        const prev   = q.regularMarketPreviousClose || price;
-        const chgNum = q.regularMarketChangePercent != null
-          ? q.regularMarketChangePercent
-          : (prev ? ((price - prev) / prev * 100) : 0);
-        const chgStr = (chgNum >= 0 ? '+' : '') + chgNum.toFixed(2) + '%';
-        const up     = chgNum >= 0;
+      const map = await yfBatchFetch(yfSyms);
+      map.forEach((data, yfSym) => {
+        const entry = batch.find(([,yf]) => yf === yfSym);
+        if (!entry) return;
+        const sym    = entry[0];
+        const chgStr = (data.chg >= 0 ? '+' : '') + data.chg.toFixed(2) + '%';
         const s = liveStocks.find(x => x.sym === sym);
-        if (s) { s.price = price; s.chg = chgStr; s.up = up; s._live = true; }
-        else { const st = STATIC_STOCKS.find(x => x.sym === sym); liveStocks.push({...(st||{sym,name:sym}),price,chg:chgStr,up,_live:true}); }
+        if (s) { s.price = data.price; s.chg = chgStr; s.up = data.up; s._live = true; }
+        else { const st = STATIC_STOCKS.find(x => x.sym === sym); liveStocks.push({...(st||{sym,name:sym}),price:data.price,chg:chgStr,up:data.up,_live:true}); }
       });
     } catch(e) {}
     updateWhatsMoving();
     onLiveDataUpdate();
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 150));
   }
   updateWhatsMoving();
   onLiveDataUpdate();
@@ -2831,67 +2864,10 @@ async function fetchCryptoLive() {
 }
 
 async function fetchLiveData() {
-  // Only show fetching status — static data already rendered by _mpInit
-  // Status managed by individual fetch functions
-
-  // ── ALWAYS: Fetch crypto from CoinGecko in parallel (free, fast, no Railway needed) ──
-  fetchCryptoLive(); // non-blocking — runs every time regardless of Railway status
-
-  // ── Layer 1: Try Railway backend (full fresh dataset) ──
-  try {
-    const res = await fetch(`${API_BASE}/all`, { signal: AbortSignal.timeout(12000) });
-    if (!res.ok) throw new Error('railway-offline');
-    const json = await res.json();
-    _retryCount = 0;
-    _apiOnline = true;
-    // Merge ALL stocks from Railway into liveStocks
-    const liveMap = {};
-    (json.stocks||[]).forEach(s => { if (s.price && s.price !== '—') liveMap[s.sym] = s; });
-    const railwaySyms = Object.keys(liveMap);
-    // Update ALL liveStocks entries with Railway data (preserve sector from static if Railway doesn't send it)
-    liveStocks = liveStocks.map(s => {
-      if (liveMap[s.sym]) {
-        const r = liveMap[s.sym];
-        return {...s, ...r, sector: r.sector || s.sector, _live: true};
-      }
-      return s;
-    });
-    window._hasLiveData = true;
-    // Add any new assets Railway returned that aren't already in liveStocks
-    (json.stocks||[]).forEach(s => { if (s.price && s.price !== '—' && !liveStocks.find(x=>x.sym===s.sym)) liveStocks.push(s); });
-    // Store indices for ticker + hero
-    if (json.indices && json.indices.length) {
-      window._liveIndices = {};
-      json.indices.forEach(idx => { window._liveIndices[idx.sym] = idx; });
-      // Update hero immediately with fresh index data
-      if (typeof updateHeroFromLiveStocks === 'function') updateHeroFromLiveStocks();
-    }
-    // Merge commodities + crypto returned by Railway into liveStocks
-    if (json.commodities && json.commodities.length) {
-      json.commodities.forEach(c => {
-        if (!c.price || c.price === '—') return;
-        const chgNum = typeof c.chg === 'number' ? c.chg : parseFloat((c.chg||'0').replace('%','').replace('+',''));
-        const chgStr = (chgNum >= 0 ? '+' : '') + Math.abs(chgNum).toFixed(2) + '%';
-        const up = chgNum >= 0;
-        const existing = liveStocks.find(s => s.sym === c.sym);
-        if (existing) {
-          existing.price = c.price; existing.chg = chgStr; existing.up = up; existing._live = true;
-        } else {
-          liveStocks.push({ sym: c.sym, name: c.name, price: c.price, chg: chgStr, up, currency: '$', _live: true });
-        }
-      });
-    }
-    renderTrending(liveStocks);
-    updateTickerFromLive();
-    onLiveDataUpdate(); // update all visible tabs with fresh Railway data
-    const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}) + ' IST';
-    setLiveStatus('live', `● LIVE · ${ts}`);
-    showApiBanner('online');
-    return; // Railway worked — done
-  } catch(e) {}
-
-  // ── Layer 2 & 3: Railway offline — fetch from CoinGecko + Yahoo Finance directly ──
-  fetchYFDirect(); // non-blocking, handles its own status updates
+  // Fetch crypto (CoinGecko, free & fast) and stocks (Yahoo Finance via CORS proxy) in parallel
+  // No backend/Railway needed — works from any static host
+  fetchCryptoLive();   // crypto — non-blocking
+  fetchYFDirect();     // stocks + commodities — non-blocking
 }
 
 // ── MULTI-SOURCE FALLBACK: runs when Railway is offline ─────────
@@ -2928,88 +2904,45 @@ async function _fetchYFDirectInner() {
     }
   } catch(e) { console.warn('CoinGecko failed:', e.message); }
 
-  // ── 2. Fetch ALL NSE stocks via /api/quote in batches of 50 (Vercel serverless) ──
+  // ── 2. Fetch ALL NSE stocks via yfBatchFetch (no backend needed) ──
   const allNseItems = STATIC_STOCKS.map(s => ({ sym: s.sym, yf: YF_STOCK_MAP[s.sym] }))
     .filter(s => s.yf && s.yf.endsWith('.NS'));
   const BATCH_SIZE = 50;
   for (let i = 0; i < allNseItems.length; i += BATCH_SIZE) {
     const batch = allNseItems.slice(i, i + BATCH_SIZE);
     try {
-      const symsStr = batch.map(b => b.yf).join(',');
-      const r = await fetch((_isLocalFile ? 'https://web-production-78fc1.up.railway.app' : '') + '/api/quote?symbols=' + encodeURIComponent(symsStr), { signal: AbortSignal.timeout(15000) });
-      if (r.ok) {
-        const j = await r.json();
-        (j?.quoteResponse?.result || []).forEach(q => {
-          if (!q?.regularMarketPrice) return;
-          const sym = Object.keys(YF_STOCK_MAP).find(k => YF_STOCK_MAP[k] === q.symbol);
-          if (!sym) return;
-          const price  = q.regularMarketPrice;
-          const prev   = q.regularMarketPreviousClose || price;
-          const chgPct = q.regularMarketChangePercent != null ? q.regularMarketChangePercent : ((price - prev) / (prev || 1) * 100);
-          const up     = chgPct >= 0;
-          const chgStr = (up ? '+' : '') + chgPct.toFixed(2) + '%';
-          const existing = liveStocks.find(s => s.sym === sym);
-          if (existing) { existing.price = price; existing.chg = chgStr; existing.up = up; existing._live = true; }
-          else { const st = STATIC_STOCKS.find(s => s.sym === sym); liveStocks.push({ ...(st||{sym,name:sym}), price, chg:chgStr, up, _live:true }); }
-          stocksUpdated++;
-        });
-      }
-    } catch(e) {
-      // Fallback: fetch one-by-one
-      await Promise.allSettled(batch.map(async item => {
-        try {
-          const { price, chg, up } = await yfFetch(item.yf);
-          if (!price) return;
-          const chgStr = (up?'+':'') + chg.toFixed(2) + '%';
-          const existing = liveStocks.find(s => s.sym === item.sym);
-          if (existing) { existing.price = price; existing.chg = chgStr; existing.up = up; existing._live = true; }
-          else { const st = STATIC_STOCKS.find(s => s.sym === item.sym); liveStocks.push({ ...(st||item), price, chg:chgStr, up, _live:true }); }
-          stocksUpdated++;
-        } catch(e2) {}
-      }));
-    }
+      const map = await yfBatchFetch(batch.map(b => b.yf));
+      map.forEach((data, yfSym) => {
+        const item = batch.find(b => b.yf === yfSym);
+        if (!item) return;
+        const chgStr = (data.chg >= 0 ? '+' : '') + data.chg.toFixed(2) + '%';
+        const existing = liveStocks.find(s => s.sym === item.sym);
+        if (existing) { existing.price = data.price; existing.chg = chgStr; existing.up = data.up; existing._live = true; }
+        else { const st = STATIC_STOCKS.find(s => s.sym === item.sym); liveStocks.push({ ...(st||item), price: data.price, chg: chgStr, up: data.up, _live: true }); }
+        stocksUpdated++;
+      });
+    } catch(e) {}
     updateWhatsMoving(); refreshHeatmapFromLive(); onLiveDataUpdate();
     await new Promise(r => setTimeout(r, 100));
   }
 
-  // ── 3. Fetch ALL commodity prices via /api/quote (batch) ──
+  // ── 3. Fetch ALL commodity prices via yfBatchFetch ──
   const commodities = [
     {sym:'GOLD',yf:'GC=F'},{sym:'SILVER',yf:'SI=F'},{sym:'CRUDE',yf:'CL=F'},
     {sym:'BRENT',yf:'BZ=F'},{sym:'NATURALGAS',yf:'NG=F'},{sym:'COPPER',yf:'HG=F'},
     {sym:'PLATINUM',yf:'PL=F'},{sym:'WHEAT',yf:'ZW=F'},{sym:'CORN',yf:'ZC=F'},
   ];
   try {
-    const commSyms = commodities.map(c => c.yf).join(',');
-    const rc = await fetch((_isLocalFile ? 'https://web-production-78fc1.up.railway.app' : '') + '/api/quote?symbols=' + encodeURIComponent(commSyms), { signal: AbortSignal.timeout(12000) });
-    if (rc.ok) {
-      const jc = await rc.json();
-      (jc?.quoteResponse?.result || []).forEach(q => {
-        if (!q?.regularMarketPrice) return;
-        const item = commodities.find(c => c.yf === q.symbol);
-        if (!item) return;
-        const price  = q.regularMarketPrice;
-        const prev   = q.regularMarketPreviousClose || price;
-        const chgPct = q.regularMarketChangePercent != null ? q.regularMarketChangePercent : ((price-prev)/(prev||1)*100);
-        const up     = chgPct >= 0;
-        const chgStr = (up?'+':'') + chgPct.toFixed(2) + '%';
-        const existing = liveStocks.find(s => s.sym === item.sym);
-        if (existing) { existing.price = price; existing.chg = chgStr; existing.up = up; }
-        else { const se = STATIC_COMMODITIES.find(s=>s.sym===item.sym); liveStocks.push({...(se||{sym:item.sym,name:item.sym,currency:'$'}),price,chg:chgStr,up}); }
-      });
-    }
-  } catch(e) {
-    // Fallback: one-by-one via yfFetch
-    await Promise.allSettled(commodities.map(async item => {
-      try {
-        const r = await yfFetch(item.yf);
-        if (!r.price) return;
-        const chgStr = (r.up?'+':'') + r.chg.toFixed(2) + '%';
-        const existing = liveStocks.find(s => s.sym === item.sym);
-        if (existing) { existing.price = r.price; existing.chg = chgStr; existing.up = r.up; }
-        else { const se = STATIC_COMMODITIES.find(s=>s.sym===item.sym); liveStocks.push({...(se||{sym:item.sym,name:item.sym,currency:'$'}),price:r.price,chg:chgStr,up:r.up}); }
-      } catch(e2) {}
-    }));
-  }
+    const commMap = await yfBatchFetch(commodities.map(c => c.yf));
+    commMap.forEach((data, yfSym) => {
+      const item = commodities.find(c => c.yf === yfSym);
+      if (!item) return;
+      const chgStr = (data.chg >= 0 ? '+' : '') + data.chg.toFixed(2) + '%';
+      const existing = liveStocks.find(s => s.sym === item.sym);
+      if (existing) { existing.price = data.price; existing.chg = chgStr; existing.up = data.up; }
+      else { const se = STATIC_COMMODITIES.find(s=>s.sym===item.sym); liveStocks.push({...(se||{sym:item.sym,name:item.sym,currency:'$'}),price:data.price,chg:chgStr,up:data.up}); }
+    });
+  } catch(e) {}
 
   const total = stocksUpdated + cryptoUpdated;
   if (total > 0) {
@@ -8470,23 +8403,21 @@ async function fetchTechnicals(sym) {
     }
   } catch(e) {}
 
-  // ── Source 2: Vercel /api/quote — fetch v8 chart via serverless (no CORS) ──
-  // We build a special chart URL and pass it through our own Vercel proxy
+  // ── Source 2: Yahoo Finance v8 chart via CORS proxies ──
   const chartEndpoints = [
-    '/api/quote?chart=' + encodeURIComponent(yfSym),  // custom chart param if supported
     'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(yfSym) + '?interval=1d&range=1y',
     'https://query2.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(yfSym) + '?interval=1d&range=1y',
   ];
 
-  // Proxy wrappers — try allorigins first (most reliable), then others
+  // Proxy wrappers
   const wrap = [
     u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
     u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+    u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
     u => 'https://thingproxy.freeboard.io/fetch/' + encodeURIComponent(u),
   ];
 
-  // Only proxy the direct Yahoo URLs (skip the /api/quote wrapper attempt)
-  const directUrls = chartEndpoints.slice(1);
+  const directUrls = chartEndpoints;
   outer:
   for (const url of directUrls) {
     for (const proxy of wrap) {
@@ -9706,16 +9637,16 @@ function _mpInit() {
   setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); updateTickerFromLive(); }, 10000);
 }
 
-// Fetch Nifty/BankNifty/Sensex via Vercel /api/indices (server-side, no CORS)
+// Fetch Nifty/BankNifty/Sensex directly from Yahoo Finance (no backend needed)
 async function _fetchIndicesVercel() {
   try {
-    const r = await fetch((_isLocalFile ? 'https://web-production-78fc1.up.railway.app' : '') + '/api/indices', { signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return;
-    const d = await r.json();
+    const idxSyms = ['^NSEI', '^NSEBANK', '^BSESN'];
+    const map = await yfBatchFetch(idxSyms);
     if (!window._liveIndices) window._liveIndices = {};
-    if (d.nifty)     { window._liveIndices['NIFTY 50']   = d.nifty;     window._liveIndices['NIFTY']     = d.nifty; }
-    if (d.banknifty) { window._liveIndices['NIFTY BANK'] = d.banknifty; window._liveIndices['BANKNIFTY'] = d.banknifty; }
-    if (d.sensex)    { window._liveIndices['SENSEX']     = d.sensex; }
+    const mk = (price, chg, up) => ({ price, chg: (chg>=0?'+':'')+chg.toFixed(2)+'%', up });
+    const n = map.get('^NSEI');    if (n) { const o=mk(n.price,n.chg,n.up); window._liveIndices['NIFTY 50']=o;   window._liveIndices['NIFTY']=o; }
+    const b = map.get('^NSEBANK'); if (b) { const o=mk(b.price,b.chg,b.up); window._liveIndices['NIFTY BANK']=o; window._liveIndices['BANKNIFTY']=o; }
+    const s = map.get('^BSESN');   if (s) { const o=mk(s.price,s.chg,s.up); window._liveIndices['SENSEX']=o; }
     if (typeof updateHeroFromLiveStocks === 'function') updateHeroFromLiveStocks();
     updateTickerFromLive();
   } catch(e) {}
@@ -9733,37 +9664,22 @@ let _bootstrapDone = false;
 async function _fastBootstrapStocks() {
   if (_bootstrapDone) return;
 
-  // ── Batch 1: Fetch ALL 150+ NSE stocks in one /api/quote call ──
+  // ── Batch 1: Fetch ALL NSE stocks via yfBatchFetch (no backend) ──
   try {
-    const allNseSyms = Object.entries(YF_STOCK_MAP)
-      .filter(([k,v]) => v.endsWith('.NS'))
-      .map(([k,v]) => v);
-
-    // Split into batches of 50 (Yahoo Finance limit per call)
+    const allNseEntries = Object.entries(YF_STOCK_MAP).filter(([k,v]) => v.endsWith('.NS'));
     const BATCH = 50;
-    for (let i = 0; i < allNseSyms.length; i += BATCH) {
-      const batch = allNseSyms.slice(i, i + BATCH);
+    for (let i = 0; i < allNseEntries.length; i += BATCH) {
+      const batch = allNseEntries.slice(i, i + BATCH);
       try {
-        const r = await fetch(`/api/quote?symbols=${encodeURIComponent(batch.join(','))}`, {
-          signal: AbortSignal.timeout(15000)
-        });
-        if (!r.ok) continue;
-        const j = await r.json();
-        const results = j?.quoteResponse?.result || [];
+        const map = await yfBatchFetch(batch.map(([,v]) => v));
         let updated = 0;
-        results.forEach(q => {
-          if (!q?.regularMarketPrice) return;
-          // Strip .NS to get our sym key
-          const nsSym = q.symbol;
-          const sym = Object.keys(YF_STOCK_MAP).find(k => YF_STOCK_MAP[k] === nsSym);
-          if (!sym) return;
-          const price = q.regularMarketPrice;
-          const prev  = q.regularMarketPreviousClose || price;
-          const chgPct = q.regularMarketChangePercent ?? ((price - prev) / (prev || 1) * 100);
-          const up     = chgPct >= 0;
-          const chgStr = (up ? '+' : '') + chgPct.toFixed(2) + '%';
+        map.forEach((data, yfSym) => {
+          const entry = batch.find(([,v]) => v === yfSym);
+          if (!entry) return;
+          const sym    = entry[0];
+          const chgStr = (data.chg >= 0 ? '+' : '') + data.chg.toFixed(2) + '%';
           const s = liveStocks.find(x => x.sym === sym);
-          if (s) { s.price = price; s.chg = chgStr; s.up = up; s._live = true; updated++; }
+          if (s) { s.price = data.price; s.chg = chgStr; s.up = data.up; s._live = true; updated++; }
         });
         if (updated > 0) {
           _bootstrapDone = true;
@@ -9776,7 +9692,7 @@ async function _fastBootstrapStocks() {
         }
       } catch(e) {}
     }
-    if (_bootstrapDone) return; // batch worked
+    if (_bootstrapDone) return;
   } catch(e) {}
 
   // ── Fallback: fetch top 25 one-by-one if batch fails ──
@@ -9979,46 +9895,40 @@ async function renderMmi() {
 }
 
 async function _fetchMmiData() {
-  // Fetch India VIX, Nifty, BankNifty, PCR from Yahoo Finance via /api/quote
+  // Fetch India VIX, Nifty, BankNifty, Sensex directly via yfBatchFetch (no backend)
   try {
-    const syms = ['^INDIAVIX', '^NSEI', '^ENSEBANK', '^BSESN'].join(',');
-    const r = await fetch((_isLocalFile ? 'https://web-production-78fc1.up.railway.app' : '') + '/api/quote?symbols=' + encodeURIComponent(syms), { signal: AbortSignal.timeout(10000) });
-    if (r.ok) {
-      const j = await r.json();
-      const results = j?.quoteResponse?.result || [];
-      const get = sym => results.find(q => q.symbol === sym);
-      const vix    = get('^INDIAVIX');
-      const nifty  = get('^NSEI');
-      const bank   = get('^ENSEBANK');
-      const sensex = get('^BSESN');
-
-      // Also get FII data for mood
-      const fii = _fiiData && _fiiData.length ? _fiiData[0] : null;
-
+    const syms = ['^INDIAVIX', '^NSEI', '^NSEBANK', '^BSESN'];
+    const map  = await yfBatchFetch(syms);
+    const get  = sym => { const d = map.get(sym); return d ? { price: d.price, chg: d.chg } : null; };
+    _mmiData = {
+      vix:    get('^INDIAVIX'),
+      nifty:  get('^NSEI'),
+      bank:   get('^NSEBANK'),
+      sensex: get('^BSESN'),
+      fii:    _fiiData && _fiiData.length ? _fiiData[0] : null,
+      ts:     Date.now(),
+    };
+    _mmiLastFetch = Date.now();
+    // Also refresh _liveIndices while we have fresh index data
+    if (!window._liveIndices) window._liveIndices = {};
+    const mk = (d) => d ? { price: d.price, chg: (d.chg>=0?'+':'')+d.chg.toFixed(2)+'%', up: d.chg>=0 } : null;
+    const n = mk(map.get('^NSEI'));    if (n) { window._liveIndices['NIFTY 50']=n;   window._liveIndices['NIFTY']=n; }
+    const b = mk(map.get('^NSEBANK')); if (b) { window._liveIndices['NIFTY BANK']=b; window._liveIndices['BANKNIFTY']=b; }
+    const s = mk(map.get('^BSESN'));   if (s) { window._liveIndices['SENSEX']=s; }
+  } catch(e) {
+    // Fallback: use _liveIndices if already fetched
+    if (!_mmiData) {
+      const idx = window._liveIndices || {};
       _mmiData = {
-        vix:    vix    ? { price: vix.regularMarketPrice,    chg: vix.regularMarketChangePercent }    : null,
-        nifty:  nifty  ? { price: nifty.regularMarketPrice,  chg: nifty.regularMarketChangePercent }  : null,
-        bank:   bank   ? { price: bank.regularMarketPrice,   chg: bank.regularMarketChangePercent }   : null,
-        sensex: sensex ? { price: sensex.regularMarketPrice, chg: sensex.regularMarketChangePercent } : null,
-        fii,
-        ts: Date.now(),
+        nifty:  idx['NIFTY 50']   || idx['NIFTY']    || null,
+        bank:   idx['NIFTY BANK'] || idx['BANKNIFTY'] || null,
+        sensex: idx['SENSEX']     || null,
+        vix:    null,
+        fii:    _fiiData && _fiiData.length ? _fiiData[0] : null,
+        ts:     Date.now(),
       };
       _mmiLastFetch = Date.now();
     }
-  } catch(e) {}
-
-  // Fallback: use _liveIndices if already fetched
-  if (!_mmiData) {
-    const idx = window._liveIndices || {};
-    _mmiData = {
-      nifty:  idx['NIFTY 50']   || idx['NIFTY']   || null,
-      bank:   idx['NIFTY BANK'] || idx['BANKNIFTY']|| null,
-      sensex: idx['SENSEX']     || null,
-      vix:    null,
-      fii:    _fiiData && _fiiData.length ? _fiiData[0] : null,
-      ts: Date.now(),
-    };
-    _mmiLastFetch = Date.now();
   }
 }
 
@@ -12421,19 +12331,13 @@ async function buildStories() {
 
   // Fetch prices for all stock/commodity subjects in one batch
   try {
-    const yfSyms = STORY_SUBJECTS.filter(s => s.yf).map(s => s.yf).join(',');
-    const r = await fetch((_isLocalFile ? 'https://web-production-78fc1.up.railway.app' : '') + '/api/quote?symbols=' + encodeURIComponent(yfSyms), {signal: AbortSignal.timeout(12000)});
-    if (r.ok) {
-      const j = await r.json();
-      (j?.quoteResponse?.result || []).forEach(q => {
-        const subj = STORY_SUBJECTS.find(s => s.yf === q.symbol);
-        if (!subj || !q.regularMarketPrice) return;
-        const price  = q.regularMarketPrice;
-        const prev   = q.regularMarketPreviousClose || price;
-        const chgPct = q.regularMarketChangePercent != null ? q.regularMarketChangePercent : ((price-prev)/(prev||1)*100);
-        _stories[subj.id] = { price, chgPct, up: chgPct >= 0, ts: Date.now() };
-      });
-    }
+    const _storyYfSyms = STORY_SUBJECTS.filter(s => s.yf).map(s => s.yf);
+    const _storyMap = await yfBatchFetch(_storyYfSyms);
+    _storyMap.forEach((data, yfSym) => {
+      const subj = STORY_SUBJECTS.find(s => s.yf === yfSym);
+      if (!subj) return;
+      _stories[subj.id] = { price: data.price, chgPct: data.chg, up: data.up, ts: Date.now() };
+    });
   } catch(e) {}
 
   // Fetch crypto prices from liveStocks (already fetched by CoinGecko)
@@ -12623,7 +12527,7 @@ function renderStorySlide() {
 async function fetchCommoditiesLive(){
   const C=[{sym:'GOLD',yf:'GC=F'},{sym:'SILVER',yf:'SI=F'},{sym:'CRUDE',yf:'CL=F'},{sym:'BRENT',yf:'BZ=F'},{sym:'NATURALGAS',yf:'NG=F'},{sym:'COPPER',yf:'HG=F'},{sym:'PLATINUM',yf:'PL=F'},{sym:'WHEAT',yf:'ZW=F'},{sym:'CORN',yf:'ZC=F'}];
   const upd=(sym,p,pct)=>{const up=pct>=0,chg=(up?'+':'')+pct.toFixed(2)+'%';const ex=liveStocks.find(s=>s.sym===sym);if(ex){ex.price=p;ex.chg=chg;ex.up=up;ex._live=true;}else{const sc=STATIC_COMMODITIES.find(s=>s.sym===sym);liveStocks.push({...(sc||{sym,name:sym,currency:'$'}),price:p,chg,up,_live:true});}};
-  try{const r=await fetch((_isLocalFile ? 'https://web-production-78fc1.up.railway.app' : '') + '/api/quote?symbols='+encodeURIComponent(C.map(c=>c.yf).join(',')),{signal:AbortSignal.timeout(12000)});if(r.ok){const j=await r.json();let n=0;(j?.quoteResponse?.result||[]).forEach(q=>{if(!q?.regularMarketPrice)return;const sym=decodeURIComponent(q.symbol||'');const it=C.find(c=>c.yf===sym||c.yf===q.symbol);if(!it)return;upd(it.sym,q.regularMarketPrice,q.regularMarketChangePercent??0);n++;});if(n>0){updateTickerFromLive();buildGlobalTicker();renderTrending(liveStocks);return;}}}catch(e){}
+  try{const _cMap=await yfBatchFetch(C.map(c=>c.yf));let n=0;_cMap.forEach((data,yfSym)=>{const it=C.find(c=>c.yf===yfSym);if(!it)return;upd(it.sym,data.price,data.chg);n++;});if(n>0){updateTickerFromLive();buildGlobalTicker();renderTrending(liveStocks);return;}}catch(e){}
   await Promise.allSettled(C.map(async it=>{try{const url='https://query1.finance.yahoo.com/v8/finance/chart/'+it.yf+'?interval=1d&range=2d';const r=await fetch('https://api.allorigins.win/get?url='+encodeURIComponent(url),{signal:AbortSignal.timeout(10000)});if(!r.ok)return;const j=await r.json();const m=JSON.parse(j.contents||'{}')?.chart?.result?.[0]?.meta;if(!m?.regularMarketPrice)return;const p2=m.regularMarketPrice,prev=m.previousClose||m.chartPreviousClose||p2;upd(it.sym,p2,((p2-prev)/(prev||1))*100);}catch(e){}}));
   updateTickerFromLive();buildGlobalTicker();renderTrending(liveStocks);
 }
