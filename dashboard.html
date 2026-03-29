@@ -10003,7 +10003,7 @@ function renderSidebarMmi() {
     else if (spread < -0.5) { score -= 7;  signals.push({ label:'Bank Nifty', val:bc.toFixed(2)+'%',                col:'#ff6d00' }); }
     else                    {              signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', col:'#ffd740' }); }
   }
-  }
+
 
   score = Math.max(0, Math.min(100, score));
   let zone, zoneCol, emoji;
@@ -10423,34 +10423,6 @@ function _parseRSSText(text, limit) {
 
 // Fetch RSS via a chain of CORS proxies → returns parsed items or []
 async function _fetchRSSItems(rssUrl, limit) {
-  // 0. /api/news — own Vercel serverless function (server-side fetch, no CORS, no rate limits)
-  try {
-    // Extract the search query from the RSS URL to use as cat param, fallback to 'markets'
-    const _qMatch = rssUrl.match(/[?&]q=([^&]+)/);
-    const _qRaw   = _qMatch ? decodeURIComponent(_qMatch[1].replace(/\+/g,' ')) : '';
-    // Find matching cat key from NEWS_URLS or story subjects
-    let _apiCat = 'markets';
-    if (typeof NEWS_URLS !== 'undefined') {
-      for (const [k, v] of Object.entries(NEWS_URLS)) { if (v === rssUrl) { _apiCat = k; break; } }
-    }
-    const _newsApiUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-      ? 'http://localhost:3000/api/news?cat=' + encodeURIComponent(_apiCat) + '&count=' + (limit||16)
-      : '/api/news?cat=' + encodeURIComponent(_apiCat) + '&count=' + (limit||16);
-    const r0 = await fetch(_newsApiUrl, { signal: AbortSignal.timeout(8000) });
-    if (r0.ok) {
-      const j0 = await r0.json();
-      if (j0.items && j0.items.length) {
-        return j0.items.slice(0, limit||16).map(i => ({
-          title:  (i.title || '').trim(),
-          link:   i.link || '#',
-          date:   i.date || '',
-          source: i.source || 'Google News',
-          ago:    i.ago || timeAgo(i.date || ''),
-        })).filter(i => i.title.length > 8);
-      }
-    }
-  } catch(e) {}
-
   // 1. rss2json.com — most reliable free public RSS-to-JSON API
   try {
     const r = await fetch(
@@ -10524,6 +10496,23 @@ async function loadNews(cat, btn) {
   container.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div class="loading-spin"></div><div style="margin-top:12px;font-size:12px;">Fetching latest news...</div></div>';
 
   const rssUrl = NEWS_URLS[cat] || NEWS_URLS.markets;
+
+  // Try own Vercel /api/news first (server-side, no CORS, no rate limits)
+  try {
+    const _nu = (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1')
+      ? 'http://localhost:3000/api/news?cat='+cat
+      : '/api/news?cat='+cat;
+    const _nr = await fetch(_nu, {signal:AbortSignal.timeout(8000)});
+    if (_nr.ok) {
+      const _nj = await _nr.json();
+      if (_nj.items && _nj.items.length) {
+        _newsLoaded[cat] = {ts:Date.now(), items:_nj.items};
+        renderNews(_nj.items);
+        return;
+      }
+    }
+  } catch(e) {}
+
   const items  = await _fetchRSSItems(rssUrl, 16);
 
   if (items.length) {
