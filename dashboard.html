@@ -13233,50 +13233,256 @@ setInterval(_syncMobileTrending, 30000);
 <!-- ══ MOBILE DRAWERS ════════════════════════════════════ -->
 <div class="mp-drawer-overlay" id="mpOverlay" onclick="mpCloseDrawer()"></div>
 
-<!-- LEFT DRAWER: Navigate + Features -->
+<!-- LEFT DRAWER: Twitter-style nav -->
+<style>
+/* Twitter-style drawer nav — mobile only, no effect on desktop */
+#mpLeft {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.tw-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  flex-shrink: 0;
+}
+.tw-drawer-avatar {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 800; color: #fff;
+  flex-shrink: 0;
+}
+.tw-drawer-close {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text);
+  font-size: 18px;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.tw-drawer-close:active { background: var(--bg3); }
+.tw-drawer-userinfo {
+  padding: 2px 20px 14px;
+  flex-shrink: 0;
+}
+.tw-drawer-username {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  line-height: 1.2;
+}
+.tw-drawer-handle {
+  font-size: 13px;
+  color: var(--text3);
+  font-family: 'DM Sans', sans-serif;
+  margin-top: 2px;
+}
+.tw-drawer-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0 0 4px;
+  flex-shrink: 0;
+}
+/* Twitter-style full-width nav row */
+.tw-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 20px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border-radius: 999px;
+  margin: 1px 8px;
+  width: calc(100% - 16px);
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  text-decoration: none;
+  color: var(--text);
+}
+.tw-nav-row:active { background: var(--bg3); }
+.tw-nav-row-icon {
+  font-size: 22px;
+  width: 26px;
+  text-align: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.tw-nav-row-label {
+  font-size: 19px;
+  font-weight: 700;
+  font-family: 'DM Sans', sans-serif;
+  color: var(--text);
+  line-height: 1.2;
+}
+.tw-nav-section-label {
+  font-size: 11px;
+  font-family: 'Space Mono', monospace;
+  color: var(--text3);
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  padding: 10px 20px 4px;
+  flex-shrink: 0;
+}
+/* Post to Pit button at bottom of drawer */
+.tw-drawer-post-btn {
+  margin: 12px 16px 20px;
+  padding: 14px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 800;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  width: calc(100% - 32px);
+  text-align: center;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.tw-drawer-post-btn:active { opacity: 0.8; }
+</style>
+
 <div class="mp-drawer mp-drawer-left" id="mpLeft">
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">
-    <span style="font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:1.5px;color:var(--text);">NAVIGATE</span>
-    <button onclick="mpCloseDrawer()" style="width:30px;height:30px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);cursor:pointer;font-size:16px;color:var(--text3);">✕</button>
+  <!-- Header: avatar + close -->
+  <div class="tw-drawer-head">
+    <div class="tw-drawer-avatar" id="drawerAvatar">M</div>
+    <button class="tw-drawer-close" onclick="mpCloseDrawer()">✕</button>
   </div>
-  <!-- Market Feed shortcut — always at top -->
-  <div style="padding:10px 12px 4px;">
-    <button onclick="switchTab(null,'feed');mpCloseDrawer()" style="width:100%;display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;background:var(--accent);border:none;cursor:pointer;font-size:13px;font-weight:700;color:#fff;">
-      ⚡ <span>Market Feed</span>
-    </button>
+
+  <!-- User info -->
+  <div class="tw-drawer-userinfo">
+    <div class="tw-drawer-username" id="drawerUsername">Trader</div>
+    <div class="tw-drawer-handle" id="drawerHandle">@marketpit</div>
   </div>
-  <div style="height:1px;background:var(--border);margin:8px 12px 4px;"></div>
-  <!-- Pits -->
-  <div style="padding:10px 12px 6px;">
-    <div style="font-size:9px;font-family:'Space Mono',monospace;color:var(--text3);letter-spacing:1.5px;margin-bottom:6px;">YOUR PITS</div>
-    <div id="mpPitList">
-      <div onclick="filterFeed('',this);mpCloseDrawer()" style="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text2);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''"><span>📊</span> All Markets</div>
-      <div onclick="filterFeed('Stocks',this);mpCloseDrawer()" style="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text2);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''"><span>🏦</span> Equities</div>
-      <div onclick="filterFeed('Crypto',this);mpCloseDrawer()" style="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text2);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''"><span>₿</span> Crypto</div>
-      <div onclick="filterFeed('Commodities',this);mpCloseDrawer()" style="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text2);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''"><span>🛢️</span> Commodities</div>
-      <div onclick="filterFeed('Macro',this);mpCloseDrawer()" style="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text2);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''"><span>🌍</span> Macro</div>
-    </div>
-  </div>
-  <div style="height:1px;background:var(--border);margin:4px 12px;"></div>
-  <!-- Features -->
-  <div style="padding:10px 12px;">
-    <div style="font-size:9px;font-family:'Space Mono',monospace;color:var(--text3);letter-spacing:1.5px;margin-bottom:8px;">FEATURES</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;">
-      <button onclick="switchTab(null,'screener');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">🔍<span>Screener</span></button>
-      <button onclick="switchTab(null,'news');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">📰<span>News</span></button>
-      <button onclick="switchTab(null,'watchlist');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">⭐<span>Watch</span></button>
-      <button onclick="switchTab(null,'paper');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">📝<span>Paper</span></button>
-      <button onclick="switchTab(null,'heatmap');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">🌡️<span>Heatmap</span></button>
-      <button onclick="switchTab(null,'ipo');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">🚀<span>IPO</span></button>
-      <button onclick="switchTab(null,'alerts');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">🔔<span>Alerts</span></button>
-      <button onclick="switchTab(null,'fii');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">🌍<span>FII</span></button>
-      <button onclick="switchTab(null,'earnings');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">📊<span>Earnings</span></button>
-      <button onclick="switchTab(null,'compare');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">⚖️<span>Compare</span></button>
-      <button onclick="switchTab(null,'mf');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">🏦<span>MF</span></button>
-      <button onclick="switchTab(null,'messages');mpCloseDrawer()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:10px;font-weight:600;color:var(--text2);">💬<span>DMs</span></button>
-    </div>
-  </div>
+
+  <div class="tw-drawer-divider"></div>
+
+  <!-- Primary nav -->
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'feed');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">⚡</span>
+    <span class="tw-nav-row-label">Market Feed</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'screener');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🔍</span>
+    <span class="tw-nav-row-label">Screener</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'watchlist');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">⭐</span>
+    <span class="tw-nav-row-label">Watchlist</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'news');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">📰</span>
+    <span class="tw-nav-row-label">News</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'alerts');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🔔</span>
+    <span class="tw-nav-row-label">Alerts</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'messages');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">💬</span>
+    <span class="tw-nav-row-label">Messages</span>
+  </button>
+
+  <div class="tw-drawer-divider" style="margin-top:6px;"></div>
+
+  <!-- Markets section -->
+  <div class="tw-nav-section-label">MARKETS</div>
+  <button class="tw-nav-row" onclick="filterFeed('',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">📊</span>
+    <span class="tw-nav-row-label">All Markets</span>
+  </button>
+  <button class="tw-nav-row" onclick="filterFeed('Stocks',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🏦</span>
+    <span class="tw-nav-row-label">Equities</span>
+  </button>
+  <button class="tw-nav-row" onclick="filterFeed('Crypto',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">₿</span>
+    <span class="tw-nav-row-label">Crypto</span>
+  </button>
+  <button class="tw-nav-row" onclick="filterFeed('Commodities',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🛢️</span>
+    <span class="tw-nav-row-label">Commodities</span>
+  </button>
+  <button class="tw-nav-row" onclick="filterFeed('Macro',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🌍</span>
+    <span class="tw-nav-row-label">Macro</span>
+  </button>
+
+  <div class="tw-drawer-divider" style="margin-top:6px;"></div>
+
+  <!-- Tools section -->
+  <div class="tw-nav-section-label">TOOLS</div>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'heatmap');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🌡️</span>
+    <span class="tw-nav-row-label">Heatmap</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'paper');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">📝</span>
+    <span class="tw-nav-row-label">Paper Trade</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'ipo');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🚀</span>
+    <span class="tw-nav-row-label">IPO Watch</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'earnings');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">📊</span>
+    <span class="tw-nav-row-label">Earnings</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'fii');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🌍</span>
+    <span class="tw-nav-row-label">FII / DII</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'compare');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">⚖️</span>
+    <span class="tw-nav-row-label">Compare</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'mf');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🏦</span>
+    <span class="tw-nav-row-label">Mutual Funds</span>
+  </button>
+
+  <!-- Post button -->
+  <div style="flex:1;min-height:16px;"></div>
+  <button class="tw-drawer-post-btn" onclick="mpCloseDrawer();setTimeout(openMobileCompose,200)">
+    Post to Pit
+  </button>
 </div>
+
+<script>
+// Populate drawer avatar + name from logged-in user
+(function syncDrawerUser() {
+  function _sync() {
+    var user = typeof getUser === 'function' ? getUser() : null;
+    var av = document.getElementById('drawerAvatar');
+    var un = document.getElementById('drawerUsername');
+    var uh = document.getElementById('drawerHandle');
+    if (user && user.name) {
+      if (av) { av.textContent = user.name.charAt(0).toUpperCase(); }
+      if (un) { un.textContent = user.name; }
+      if (uh) { uh.textContent = '@' + user.name.toLowerCase().replace(/\s+/g,''); }
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function(){ setTimeout(_sync, 800); });
+  } else {
+    setTimeout(_sync, 800);
+  }
+})();
+</script>
 
 <!-- RIGHT DRAWER: Markets data -->
 <div class="mp-drawer mp-drawer-right" id="mpRight">
