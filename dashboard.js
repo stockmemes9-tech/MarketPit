@@ -719,7 +719,7 @@ setInterval(updateTickerFromLive, 20000);
 setInterval(() => renderTrending(liveStocks), 30000);
 // Refresh sidebar every 15 seconds
 setInterval(() => renderTrending(liveStocks), 15000);
-// Auto-refresh news every 5 minutes if news page is open
+// Auto-refresh news every 2 hours if news page is open
 setInterval(() => {
   if (window._activePage === 'news') {
     const activeBtn = document.querySelector('#newsCatBtns button[style*="accent"]');
@@ -727,7 +727,7 @@ setInterval(() => {
     delete _newsLoaded[cat];
     loadNews(cat, activeBtn);
   }
-}, 5 * 60 * 1000);
+}, 2 * 60 * 60 * 1000);
 setInterval(() => { try { renderTrending(liveStocks); } catch(e) {} }, 15000);
 let _cryptoFetching = false;
 async function fetchCryptoLive() {
@@ -8272,6 +8272,9 @@ const NEWS_RSS_URLS = {
   commodities: 'https://news.google.com/rss/search?q=gold+price+crude+oil+india+today&hl=en-IN&gl=IN&ceid=IN:en',
 };
 
+// ── NEWS CACHE: 2 hours ──
+const NEWS_CACHE_MS = 2 * 60 * 60 * 1000;
+
 function timeAgo(dateStr) {
   if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -8336,22 +8339,42 @@ async function loadNews(cat, btn) {
   const container = document.getElementById('newsContainer');
   if (!container) return;
 
-  // Cache 5 min
-  if (_newsLoaded[cat] && Date.now() - _newsLoaded[cat].ts < 300000) { renderNews(_newsLoaded[cat].items); return; }
+  // Cache 2 hours
+  if (_newsLoaded[cat] && Date.now() - _newsLoaded[cat].ts < NEWS_CACHE_MS) { renderNews(_newsLoaded[cat].items); return; }
   container.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div class="loading-spin"></div><div style="margin-top:12px;font-size:12px;">Fetching latest news…</div></div>';
 
   const rssUrl = NEWS_RSS_URLS[cat] || NEWS_RSS_URLS.markets;
 
-  // Strategy 1: rss2json (best — no CORS, fast, reliable)
+  // Strategy 1: allorigins (no rate limit, no CORS issues)
+  try {
+    const px = 'https://api.allorigins.win/get?url=' + encodeURIComponent(rssUrl);
+    const r = await fetch(px, { signal: AbortSignal.timeout(10000) });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.contents && j.contents.includes('<item>')) {
+        const items = _parseRSSText(j.contents);
+        if (items && items.length) { _newsLoaded[cat] = { ts: Date.now(), items }; renderNews(items); return; }
+      }
+    }
+  } catch(e) {}
+
+  // Strategy 2: rss2json fallback
   try {
     const items = await _fetchRss2Json(rssUrl, 16);
     if (items && items.length) { _newsLoaded[cat] = { ts: Date.now(), items }; renderNews(items); return; }
   } catch(e) {}
 
-  // Strategy 2: raw RSS via CORS proxies
+  // Strategy 3: corsproxy.io fallback
   try {
-    const items = await _fetchRssViaProxy(rssUrl);
-    if (items && items.length) { _newsLoaded[cat] = { ts: Date.now(), items }; renderNews(items); return; }
+    const px2 = 'https://corsproxy.io/?' + encodeURIComponent(rssUrl);
+    const r2 = await fetch(px2, { signal: AbortSignal.timeout(10000) });
+    if (r2.ok) {
+      const text = await r2.text();
+      if (text.includes('<item>')) {
+        const items = _parseRSSText(text);
+        if (items && items.length) { _newsLoaded[cat] = { ts: Date.now(), items }; renderNews(items); return; }
+      }
+    }
   } catch(e) {}
 
   // All failed
