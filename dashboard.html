@@ -681,10 +681,10 @@ header {
 .opt-itm-put  { background:rgba(0,168,84,0.05); }
 
 /* ── BOTTOM NAV (mobile only) ── */
-.bottom-nav { display:none; position:fixed; bottom:0; left:0; right:0; height:50px; background:var(--bg2); border-top:1px solid var(--border); z-index:300; }
-.bottom-nav-inner { display:flex; height:100%; align-items:center; }
+.bottom-nav { display:none; position:fixed; bottom:0; left:0; right:0; height:56px; background:var(--bg2); border-top:1px solid var(--border); z-index:300; }
+.bottom-nav-inner { display:flex; height:100%; align-items:stretch; width:100%; padding:0; margin:0; }
 /* each tab is equal flex, icon only, no labels */
-.bn-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; cursor:pointer; border:none; background:none; padding:0; -webkit-tap-highlight-color:transparent; position:relative; }
+.bn-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; cursor:pointer; border:none; background:none; padding:0; margin:0; -webkit-tap-highlight-color:transparent; position:relative; min-width:0; }
 .bn-item svg { width:24px; height:24px; }
 .bn-item:active { opacity:0.55; }
 /* inactive icons = thin outline stroke */
@@ -730,7 +730,7 @@ header {
 
   /* Center feed = full width */
   .main-feed { flex: 1 1 100% !important; min-width: 0 !important; width: 100% !important; }
-  .feed-scroll { padding: 4px 10px 80px !important; }
+  .feed-scroll { padding: 4px 10px 72px !important; }
 
   /* Header compact */
   header { height: 46px !important; padding: 0 8px !important; gap: 4px !important; }
@@ -1995,7 +1995,7 @@ header {
     </button>
 
     <!-- 3. Compose (replaces Grok) -->
-    <button class="bn-item" id="bn-compose" onclick="openMobileCompose()" aria-label="Post">
+    <button class="bn-item" id="bn-compose" onclick="if(typeof openMobileCompose==='function'){openMobileCompose();}else if(typeof window.openMobileCompose==='function'){window.openMobileCompose();}" aria-label="Post">
       <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       <svg class="ic-filled" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
     </button>
@@ -2039,7 +2039,8 @@ function openMobileSearch() {
   setTimeout(function() {
     var inp = document.getElementById('mobileSearchInput');
     if (inp) { inp.value = ''; inp.focus(); }
-    document.getElementById('mobileSearchDrop').innerHTML = '';
+    var dst = document.getElementById('mobileSearchDrop');
+    if (dst) dst.innerHTML = '';
   }, 60);
 }
 function closeMobileSearch() {
@@ -2047,24 +2048,59 @@ function closeMobileSearch() {
   if (modal) modal.style.display = 'none';
 }
 function onMobileSearchInput(val) {
-  var hdr = document.getElementById('headerSearch');
-  if (hdr) {
-    hdr.value = val;
-    if (typeof onHeaderSearch === 'function') onHeaderSearch(val);
+  var dst = document.getElementById('mobileSearchDrop');
+  if (!dst) return;
+  val = (val || '').trim();
+  if (val.length < 1) { dst.innerHTML = ''; return; }
+
+  // Build results directly — same logic as onHeaderSearch but renders into mobileSearchDrop
+  var ql = val.toLowerCase();
+  var results = [];
+
+  // Stocks
+  if (typeof allStockSymbols !== 'undefined') {
+    allStockSymbols.filter(function(s) {
+      return s.sym.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql);
+    }).slice(0, 5).forEach(function(s) { results.push(s); });
   }
-  setTimeout(function() {
-    var src = document.getElementById('headerDrop');
-    var dst = document.getElementById('mobileSearchDrop');
-    if (src && dst) {
-      if (val.length < 1) { dst.innerHTML = ''; return; }
-      dst.innerHTML = src.innerHTML || '<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px;">No results</div>';
-      dst.querySelectorAll('a, [onclick]').forEach(function(el) {
-        el.addEventListener('click', function() { setTimeout(closeMobileSearch, 100); });
-      });
-    }
-  }, 150);
+  // Crypto
+  if (typeof CRYPTO_LIST !== 'undefined') {
+    CRYPTO_LIST.filter(function(s) {
+      return s.sym.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql);
+    }).slice(0, 3).forEach(function(s) { results.push(s); });
+  }
+  // Commodities
+  if (typeof COMM_LIST !== 'undefined') {
+    COMM_LIST.filter(function(s) {
+      return s.sym.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql);
+    }).slice(0, 2).forEach(function(s) { results.push(s); });
+  }
+
+  results = results.slice(0, 8);
+
+  if (!results.length) {
+    dst.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px;">No results for "' + val + '"</div>';
+    return;
+  }
+
+  dst.innerHTML = results.map(function(s) {
+    var sym = (s.sym || '').replace(/'/g, '');
+    var name = (s.name || '').replace(/'/g, '');
+    var bc = s.bc || 'var(--accent)';
+    var badge = s.badge || '';
+    return '<div style="padding:14px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);background:var(--bg2);active:background:var(--bg3);"'
+      + ' ontouchstart="this.style.background=\'var(--bg3)\'"'
+      + ' ontouchend="this.style.background=\'var(--bg2)\'"'
+      + ' onclick="if(typeof openStockModal===\'function\'){openStockModal(\'' + sym + '\',\'' + name + '\');}closeMobileSearch();">'
+      + '<div>'
+      + '<div style="font-family:\'Space Mono\',monospace;font-size:12px;font-weight:700;color:var(--text);">' + s.sym + '</div>'
+      + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + s.name + '</div>'
+      + '</div>'
+      + '<span style="font-size:9px;color:' + bc + ';border:1px solid ' + bc + '44;border-radius:4px;padding:2px 6px;">' + badge + '</span>'
+      + '</div>';
+  }).join('');
 }
-<\/script>
+</script>
 
 <!-- MOBILE COMPOSE MODAL (Twitter-style bottom sheet) -->
 <div id="mobileComposeModal" onclick="if(event.target===this)closeMobileCompose()">
@@ -2097,10 +2133,17 @@ window._mobilePit = '';
 
 window.openMobileCompose = function() {
   var modal = document.getElementById('mobileComposeModal');
+  if (!modal) return;
+  // Sync avatar
   var av = document.getElementById('mobileComposeAv');
   var srcAv = document.getElementById('composeAv');
   if (srcAv && av) { av.textContent = srcAv.textContent; av.style.cssText += srcAv.style.cssText; }
-  if (modal) { modal.classList.add('open'); document.getElementById('mobileComposeInput').focus(); }
+  // Open modal first, then focus input after it's visible
+  modal.classList.add('open');
+  setTimeout(function() {
+    var inp = document.getElementById('mobileComposeInput');
+    if (inp) { inp.focus(); }
+  }, 120);
   // Sync trending tags
   var srcTags = document.getElementById('trendingTags');
   var dstTags = document.getElementById('mobileTrendingTags');
