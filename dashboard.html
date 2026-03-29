@@ -681,13 +681,27 @@ header {
 .opt-itm-put  { background:rgba(0,168,84,0.05); }
 
 /* ── BOTTOM NAV (mobile only) ── */
-.bottom-nav { display:none; position:fixed; bottom:0; left:0; right:0; height:64px; background:var(--bg2); border-top:1px solid var(--border); z-index:300; box-shadow:0 -4px 20px rgba(0,0,0,0.1); }
+.bottom-nav { display:none; position:fixed; bottom:0; left:0; right:0; height:58px; background:var(--bg2); border-top:1px solid var(--border); z-index:300; box-shadow:0 -1px 0 var(--border); }
 .bottom-nav-inner { display:flex; height:100%; align-items:stretch; }
-.bn-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; cursor:pointer; transition:all 0.15s; border:none; background:none; color:var(--text3); font-size:10px; font-weight:600; font-family:'DM Sans',sans-serif; padding:8px 4px; -webkit-tap-highlight-color:transparent; }
-.bn-item.active { color:var(--accent); }
-.bn-item.active svg { stroke:var(--accent); }
-.bn-item svg { width:22px; height:22px; stroke:var(--text3); transition:stroke 0.15s; flex-shrink:0; }
-.bn-item:active { transform:scale(0.92); }
+.bn-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0; cursor:pointer; transition:all 0.15s; border:none; background:none; color:var(--text3); font-size:0; font-family:'DM Sans',sans-serif; padding:0; -webkit-tap-highlight-color:transparent; position:relative; }
+.bn-item.active svg { stroke:var(--text); }
+.bn-item svg { width:26px; height:26px; stroke:var(--text3); transition:stroke 0.15s; flex-shrink:0; fill:none; }
+.bn-item.active svg.filled { fill:var(--text); stroke:var(--text); }
+.bn-item:active { transform:scale(0.88); }
+/* Twitter-style FAB compose button */
+.bn-compose-fab { flex:none; width:58px; display:flex; align-items:center; justify-content:center; cursor:pointer; -webkit-tap-highlight-color:transparent; border:none; background:none; }
+.bn-compose-fab-inner { width:52px; height:42px; border-radius:999px; background:var(--accent); display:flex; align-items:center; justify-content:center; transition:opacity 0.15s, transform 0.15s; box-shadow:0 2px 8px rgba(0,112,243,0.35); }
+.bn-compose-fab:active .bn-compose-fab-inner { transform:scale(0.92); opacity:0.85; }
+/* Mobile compose modal */
+#mobileComposeModal { display:none; position:fixed; inset:0; z-index:900; background:rgba(0,0,0,0.5); }
+#mobileComposeModal.open { display:flex; flex-direction:column; justify-content:flex-end; }
+.mobile-compose-sheet { background:var(--bg2); border-radius:20px 20px 0 0; padding:16px; max-height:92vh; display:flex; flex-direction:column; }
+.mobile-compose-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-shrink:0; }
+.mobile-compose-avatar { width:38px; height:38px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; color:#fff; flex-shrink:0; }
+.mobile-compose-textarea { flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:16px; font-family:'DM Sans',sans-serif; resize:none; min-height:120px; line-height:1.5; width:100%; }
+.mobile-compose-textarea::placeholder { color:var(--text3); }
+.mobile-compose-actions { display:flex; align-items:center; gap:8px; padding-top:12px; border-top:1px solid var(--border); flex-shrink:0; flex-wrap:wrap; }
+.mobile-compose-post-btn { background:var(--accent); color:#fff; border:none; border-radius:999px; padding:9px 22px; font-weight:700; font-size:14px; font-family:'DM Sans',sans-serif; cursor:pointer; margin-left:auto; }
 
 /* ── MOBILE SIDEBAR DRAWER ── */
 .sidebar-drawer-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:350; }
@@ -735,8 +749,8 @@ header {
   /* Feed */
   .feed-filters { padding: 4px 8px !important; gap: 6px !important; }
   .filter-btn { padding: 4px 8px !important; font-size: 10px !important; }
-  .compose-box { padding: 8px !important; }
-  .compose-input { font-size: 12px !important; min-height: 44px !important; }
+  /* Hide inline compose box on mobile — FAB button replaces it */
+  .compose-box { display: none !important; }
   .btn-post { padding: 7px 10px !important; font-size: 11px !important; }
   .post-card { padding: 8px !important; }
 
@@ -823,6 +837,10 @@ header {
   .mp-drawer { display: none !important; }
   .mp-drawer-overlay { display: none !important; }
   .main-feed     { flex: 1 !important; width: auto !important; }
+  /* Always show inline compose box on desktop */
+  .compose-box   { display: block !important; }
+  /* Never show mobile compose modal on desktop */
+  #mobileComposeModal { display: none !important; }
 }
 </style>
 <body>
@@ -1206,28 +1224,7 @@ header {
     </div>
 
 
-    <!-- MOBILE FEATURES GRID (hidden on desktop) -->
-    <div id="mobileFeatsLeft" class="mobile-only">
-      <div class="section-label" style="padding:8px 8px 4px;">Features</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:0 6px 8px;">
-        <div onclick="switchTab(null,'pits')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🏛️<span>Pits</span></div>
-        <div onclick="switchTab(null,'screener')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🔍<span>Screener</span></div>
-        <div onclick="switchTab(null,'news')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">📰<span>News</span></div>
-        <div onclick="switchTab(null,'messages')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">💬<span>Messages</span></div>
-        <div onclick="switchTab(null,'watchlist')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">⭐<span>Watchlist</span></div>
-        <div onclick="switchTab(null,'paper')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">📝<span>Paper</span></div>
-        <div onclick="switchTab(null,'heatmap')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🌡️<span>Heatmap</span></div>
-        <div onclick="switchTab(null,'ipo')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🚀<span>IPO</span></div>
-        <div onclick="switchTab(null,'alerts')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🔔<span>Alerts</span></div>
-        <div onclick="switchTab(null,'fii')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🌍<span>FII</span></div>
-        <div onclick="switchTab(null,'mmi')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">😊<span>Mood</span></div>
-        <div onclick="switchTab(null,'earnings')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">📊<span>Earnings</span></div>
-        <div onclick="switchTab(null,'compare')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">⚖️<span>Compare</span></div>
-        <div onclick="switchTab(null,'rooms')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🎙️<span>Rooms</span></div>
-        <div onclick="switchTab(null,'mf')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🏦<span>MF</span></div>
-        <div onclick="switchTab(null,'predict')" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px;border-radius:10px;background:var(--bg3);border:1px solid var(--border);cursor:pointer;font-size:9px;font-weight:600;color:var(--text2);text-align:center;">🎯<span>Predict</span></div>
-      </div>
-    </div>
+
     <!-- STOCK SEARCH -->
     <div style="padding:8px 8px 0;">
       <div class="trend-header">
@@ -1970,31 +1967,112 @@ header {
 </div>
 </div>
 
-<!-- BOTTOM NAV (mobile) -->
+<!-- BOTTOM NAV (mobile) — Twitter-style -->
 <div class="bottom-nav">
   <div class="bottom-nav-inner">
-    <button class="bn-item active" onclick="switchTabMobile(this,'feed')">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      Feed
+    <!-- Home / Feed -->
+    <button class="bn-item active" id="bn-feed" onclick="switchTabMobile(this,'feed')" aria-label="Feed">
+      <svg viewBox="0 0 24 24"><path class="filled" d="M12 1.696L.622 9.862a.75.75 0 00.04 1.24l.044.03v10.118a.75.75 0 00.75.75H8.5v-5.5a.5.5 0 01.5-.5h6a.5.5 0 01.5.5v5.5h7.044a.75.75 0 00.75-.75V11.132l.044-.03a.75.75 0 00.04-1.24L12 1.696z"/></svg>
     </button>
-    <button class="bn-item" onclick="switchTabMobile(this,'watchlist')">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-      Watch
+    <!-- Search -->
+    <button class="bn-item" id="bn-screener" onclick="switchTabMobile(this,'screener')" aria-label="Screener">
+      <svg viewBox="0 0 24 24"><path class="filled" d="M10.25 3.75c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.795 0 3.419-.726 4.596-1.904 1.178-1.177 1.904-2.801 1.904-4.596 0-3.59-2.91-6.5-6.5-6.5zm-8.5 6.5c0-4.694 3.806-8.5 8.5-8.5s8.5 3.806 8.5 8.5c0 1.986-.682 3.815-1.814 5.262l4.276 4.276a1 1 0 01-1.414 1.414l-4.276-4.276A8.463 8.463 0 0110.25 18.75c-4.694 0-8.5-3.806-8.5-8.5z"/></svg>
     </button>
-    <button class="bn-item" onclick="mpOpenDrawer('left')" id="bnMenuBtn">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-      More
+    <!-- FAB Compose button (centre) -->
+    <button class="bn-compose-fab" onclick="openMobileCompose()" aria-label="Post">
+      <div class="bn-compose-fab-inner">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </div>
     </button>
-    <button class="bn-item" onclick="switchTabMobile(this,'news')">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>
-      News
+    <!-- Notifications -->
+    <button class="bn-item" id="bn-alerts" onclick="switchTabMobile(this,'alerts')" aria-label="Alerts">
+      <svg viewBox="0 0 24 24"><path class="filled" d="M11.996 2c-4.062 0-7.49 3.021-7.999 7.051L2.866 14H1.5a1 1 0 000 2h3.545a4.502 4.502 0 008.91 0H17.5a1 1 0 000-2h-1.366l-1.131-4.949C14.486 5.021 11.062 2 11.996 2zM9.546 16h4.908a2.5 2.5 0 01-4.908 0z"/></svg>
     </button>
-    <button class="bn-item" onclick="switchTabMobile(this,'paper')">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-      Paper
+    <!-- Messages -->
+    <button class="bn-item" id="bn-messages" onclick="switchTabMobile(this,'messages')" aria-label="Messages">
+      <svg viewBox="0 0 24 24"><path class="filled" d="M1.998 5.5a2.5 2.5 0 012.5-2.5h15a2.5 2.5 0 012.5 2.5v11a2.5 2.5 0 01-2.5 2.5H14.2l-3.45 2.71a1 1 0 01-1.5-.83V19H4.498a2.5 2.5 0 01-2.5-2.5v-11z"/></svg>
     </button>
   </div>
 </div>
+
+<!-- MOBILE COMPOSE MODAL (Twitter-style bottom sheet) -->
+<div id="mobileComposeModal" onclick="if(event.target===this)closeMobileCompose()">
+  <div class="mobile-compose-sheet" onclick="event.stopPropagation()">
+    <div class="mobile-compose-header">
+      <button onclick="closeMobileCompose()" style="background:none;border:none;cursor:pointer;font-size:17px;font-weight:700;color:var(--text);padding:4px 8px;border-radius:8px;line-height:1;">✕</button>
+      <button class="mobile-compose-post-btn" id="mobilePostBtn" onclick="submitMobilePost()">Post</button>
+    </div>
+    <div style="display:flex;gap:10px;flex:1;overflow:hidden;">
+      <div class="mobile-compose-avatar" id="mobileComposeAv">?</div>
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+        <textarea class="mobile-compose-textarea" id="mobileComposeInput"
+          placeholder="Drop your trade idea, analysis, or market take…"
+          oninput="onMobileComposeInput(this)"></textarea>
+        <div id="mobileTrendingTags" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;"></div>
+      </div>
+    </div>
+    <div class="mobile-compose-actions">
+      <span class="pit-tag stocks" onclick="selectMobilePit(this,'Stocks')">+ Stocks</span>
+      <span class="pit-tag crypto" onclick="selectMobilePit(this,'Crypto')">+ Crypto</span>
+      <span class="pit-tag commodities" onclick="selectMobilePit(this,'Commodities')">+ Commodities</span>
+      <span class="pit-tag macro" onclick="selectMobilePit(this,'Macro')">+ Macro</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Mobile compose sheet ──────────────────────────────────────
+window._mobilePit = '';
+
+window.openMobileCompose = function() {
+  var modal = document.getElementById('mobileComposeModal');
+  var av = document.getElementById('mobileComposeAv');
+  var srcAv = document.getElementById('composeAv');
+  if (srcAv && av) { av.textContent = srcAv.textContent; av.style.cssText += srcAv.style.cssText; }
+  if (modal) { modal.classList.add('open'); document.getElementById('mobileComposeInput').focus(); }
+  // Sync trending tags
+  var srcTags = document.getElementById('trendingTags');
+  var dstTags = document.getElementById('mobileTrendingTags');
+  if (srcTags && dstTags) dstTags.innerHTML = srcTags.innerHTML;
+};
+
+window.closeMobileCompose = function() {
+  var modal = document.getElementById('mobileComposeModal');
+  if (modal) modal.classList.remove('open');
+};
+
+window.onMobileComposeInput = function(el) {
+  // Mirror to main compose input so submitPost() works
+  var main = document.getElementById('composeInput');
+  if (main) { main.value = el.value; if (typeof onComposeInput === 'function') onComposeInput(main); }
+};
+
+window.selectMobilePit = function(el, pit) {
+  // Deactivate all mobile pit tags visually
+  document.querySelectorAll('.mobile-compose-actions .pit-tag').forEach(function(t) {
+    t.classList.remove('active-pit');
+  });
+  // Toggle: if same pit clicked again, deselect
+  if (typeof _selectedPit !== 'undefined' && _selectedPit === pit) {
+    window._selectedPit !== undefined && (window._selectedPit = '');
+    // try via the JS global
+    if (typeof selectPit === 'function') { var dummy = {classList:{add:function(){},remove:function(){}}}; selectPit(dummy, pit); }
+  } else {
+    el.classList.add('active-pit');
+    // Set via the existing selectPit fn which sets _selectedPit
+    if (typeof selectPit === 'function') selectPit(el, pit);
+  }
+};
+
+window.submitMobilePost = function() {
+  var input = document.getElementById('mobileComposeInput');
+  var main = document.getElementById('composeInput');
+  if (main && input) main.value = input.value;
+  if (typeof submitPost === 'function') submitPost();
+  input.value = '';
+  closeMobileCompose();
+};
+</script>
 
 <!-- SHARE POPUP -->
 <div id="sharePopup" class="share-popup">
