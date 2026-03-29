@@ -9823,9 +9823,14 @@ function _mpInit() {
 
   // ── STEP 3: Safety re-renders — update sidebar as data arrives ──
   setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); }, 2000);
-  setTimeout(() => { loadNews('markets', document.getElementById('nc_markets')); }, 2500);
   setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); updateTickerFromLive(); }, 5000);
   setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); updateTickerFromLive(); }, 10000);
+  // Pre-load news only after heavier fetches are done, and only if news tab is active
+  setTimeout(() => {
+    if (window._activePage === 'news') {
+      loadNews('markets', document.getElementById('nc_markets'));
+    }
+  }, 6000);
 }
 
 // Fetch Nifty/BankNifty/Sensex directly from Yahoo Finance (no backend needed)
@@ -12599,8 +12604,10 @@ async function buildStories() {
   const track = document.getElementById('storiesTrack');
   if (!track) return;
 
-  // ── Render bubbles IMMEDIATELY with whatever data we have ──
-  // This makes story rings visible at once — news loads in background
+  // ── Yield to browser first so the page stays responsive ──
+  await new Promise(r => setTimeout(r, 0));
+
+  // ── Render bubbles with whatever data we have now ──
   renderStoryBubbles();
 
   // Fetch prices for all stock/commodity subjects in one batch
@@ -12818,7 +12825,8 @@ async function fetchCommoditiesLive(){
 setTimeout(fetchCommoditiesLive,800);
 setInterval(fetchCommoditiesLive,5*60*1000);
 
-buildStories();
+// Defer buildStories until after the page is fully interactive — prevents freeze on load
+setTimeout(buildStories, 1500);
 setInterval(buildStories, 60 * 60 * 1000);
 
 // Also refresh stories when live data arrives
