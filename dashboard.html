@@ -9844,9 +9844,13 @@ async function _fetchIndicesVercel() {
     const b = map.get('^NSEBANK'); if (b) { const o=mk(b.price,b.chg,b.up); window._liveIndices['NIFTY BANK']=o; window._liveIndices['BANKNIFTY']=o; }
     const s = map.get('^BSESN');   if (s) { const o=mk(s.price,s.chg,s.up); window._liveIndices['SENSEX']=o; }
     if (typeof updateHeroFromLiveStocks === 'function') updateHeroFromLiveStocks();
+    // ── Refresh MMI gauge whenever fresh index data arrives ──
+    try { renderSidebarMmi(); } catch(e) {}
     updateTickerFromLive();
   } catch(e) {}
 }
+// ── Auto-refresh indices (+ MMI + hero prices) every 60 seconds ──
+setInterval(_fetchIndicesVercel, 60000);
 
 // Fast-fetch top 25 most-watched NSE stocks via YF in parallel
 // Updates gainers/losers and ticker WITHOUT waiting for Railway
@@ -12370,8 +12374,10 @@ function renderHeatmap() {
   }
 
   async function updateHeroPrices() {
-    const gotLive = updateHeroFromLiveStocks();
-    if (gotLive) return;
+    // Always try live stocks first (fast, no network)
+    updateHeroFromLiveStocks();
+    // Always also re-fetch from Yahoo Finance so prices never go stale
+    // (updateHeroFromLiveStocks only reads _liveIndices which may be old)
     for (const s of HERO_SYMBOLS) {
       const el = document.getElementById(s.id);
       if (!el) continue;
