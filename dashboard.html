@@ -682,9 +682,9 @@ header {
 
 /* ── BOTTOM NAV (mobile only) ── */
 .bottom-nav { display:none; position:fixed; bottom:0; left:0; right:0; height:50px; background:var(--bg2); border-top:1px solid var(--border); z-index:300; }
-.bottom-nav-inner { display:flex; height:100%; align-items:center; }
+.bottom-nav-inner { display:flex; height:100%; align-items:center; width:100%; }
 /* each tab is equal flex, icon only, no labels */
-.bn-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; cursor:pointer; border:none; background:none; padding:0; -webkit-tap-highlight-color:transparent; position:relative; }
+.bn-item { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; cursor:pointer; border:none; background:none; padding:0; -webkit-tap-highlight-color:transparent; position:relative; }
 .bn-item svg { width:24px; height:24px; }
 .bn-item:active { opacity:0.55; }
 /* inactive icons = thin outline stroke */
@@ -12399,22 +12399,22 @@ function renderHeatmap() {
 
 const STORY_SUBJECTS = [
   // NSE Stocks
-  {id:'RELIANCE',  label:'Reliance',  emoji:'🛢️',  type:'stock', yf:'RELIANCE.NS',  newsQ:'Reliance Industries RIL stock NSE'},
-  {id:'TCS',       label:'TCS',       emoji:'💻',  type:'stock', yf:'TCS.NS',        newsQ:'TCS Tata Consultancy Services stock'},
-  {id:'HDFCBANK',  label:'HDFC Bank', emoji:'🏦',  type:'stock', yf:'HDFCBANK.NS',   newsQ:'HDFC Bank stock NSE India'},
-  {id:'INFY',      label:'Infosys',   emoji:'🖥️',  type:'stock', yf:'INFY.NS',       newsQ:'Infosys INFY stock earnings'},
-  {id:'SBIN',      label:'SBI',       emoji:'🏛️',  type:'stock', yf:'SBIN.NS',       newsQ:'SBI State Bank India stock NSE'},
-  {id:'TATAMOTORS',label:'Tata Motors',emoji:'🚗', type:'stock', yf:'TATAMOTORS.NS', newsQ:'Tata Motors stock EV NSE'},
-  {id:'ADANIENT',  label:'Adani',     emoji:'⚡',  type:'stock', yf:'ADANIENT.NS',   newsQ:'Adani Enterprises stock NSE'},
-  {id:'ZOMATO',    label:'Zomato',    emoji:'🍱',  type:'stock', yf:'ZOMATO.NS',     newsQ:'Zomato stock NSE India'},
+  {id:'RELIANCE',  label:'Reliance',  emoji:'🛢️',  type:'stock', yf:'RELIANCE.NS'},
+  {id:'TCS',       label:'TCS',       emoji:'💻',  type:'stock', yf:'TCS.NS'},
+  {id:'HDFCBANK',  label:'HDFC Bank', emoji:'🏦',  type:'stock', yf:'HDFCBANK.NS'},
+  {id:'INFY',      label:'Infosys',   emoji:'🖥️',  type:'stock', yf:'INFY.NS'},
+  {id:'SBIN',      label:'SBI',       emoji:'🏛️',  type:'stock', yf:'SBIN.NS'},
+  {id:'TATAMOTORS',label:'Tata Motors',emoji:'🚗', type:'stock', yf:'TATAMOTORS.NS'},
+  {id:'ADANIENT',  label:'Adani',     emoji:'⚡',  type:'stock', yf:'ADANIENT.NS'},
+  {id:'ZOMATO',    label:'Zomato',    emoji:'🍱',  type:'stock', yf:'ZOMATO.NS'},
   // Crypto
-  {id:'BTC',       label:'Bitcoin',   emoji:'₿',   type:'crypto', cg:'bitcoin',   newsQ:'Bitcoin BTC price today'},
-  {id:'ETH',       label:'Ethereum',  emoji:'💎',  type:'crypto', cg:'ethereum',  newsQ:'Ethereum ETH price today'},
-  {id:'SOL',       label:'Solana',    emoji:'☀️',  type:'crypto', cg:'solana',    newsQ:'Solana SOL crypto price'},
+  {id:'BTC',       label:'Bitcoin',   emoji:'₿',   type:'crypto', cg:'bitcoin'},
+  {id:'ETH',       label:'Ethereum',  emoji:'💎',  type:'crypto', cg:'ethereum'},
+  {id:'SOL',       label:'Solana',    emoji:'☀️',  type:'crypto', cg:'solana'},
   // Commodities
-  {id:'GOLD',      label:'Gold',      emoji:'🥇',  type:'commodity', yf:'GC=F',  newsQ:'gold price today India MCX'},
-  {id:'CRUDE',     label:'Crude Oil', emoji:'🛢️',  type:'commodity', yf:'CL=F',  newsQ:'crude oil price today WTI'},
-  {id:'SILVER',    label:'Silver',    emoji:'🪙',  type:'commodity', yf:'SI=F',  newsQ:'silver price today India MCX'},
+  {id:'GOLD',      label:'Gold',      emoji:'🥇',  type:'commodity', yf:'GC=F'},
+  {id:'CRUDE',     label:'Crude Oil', emoji:'🛢️',  type:'commodity', yf:'CL=F'},
+  {id:'SILVER',    label:'Silver',    emoji:'🪙',  type:'commodity', yf:'SI=F'},
 ];
 
 let _stories = {};          // {id: {price, chg, up, news, ts}}
@@ -12448,62 +12448,43 @@ async function buildStories() {
     }
   });
 
-  // Fetch news headlines for each subject — rss2json first, then raw proxy fallback
+  // Fetch news headlines for each subject via rss2json
   await Promise.allSettled(STORY_SUBJECTS.map(async subj => {
     try {
-      const q = subj.newsQ || (subj.label + ' stock market India');
-      const rssUrl = 'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-IN&gl=IN&ceid=IN:en';
-
-      // Helper: parse rss2json response
-      const mapRss2Json = (j) => j.items?.slice(0, 3).map(i => ({
-        title: (i.title || '').trim(),
-        link:  i.link || '#',
-        ago:   typeof timeAgo === 'function' ? timeAgo(i.pubDate || '') : '',
-        src:   (j.feed?.title || i.author || 'Google News').replace(/ - .*$/, '').slice(0, 30),
-      })).filter(n => n.title.length > 10) || [];
-
-      // Strategy 1: rss2json (no CORS issues, returns clean JSON)
-      try {
-        const api2j = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(rssUrl) + '&count=3';
-        const r2 = await fetch(api2j, { signal: AbortSignal.timeout(9000) });
-        if (r2.ok) {
-          const j2 = await r2.json();
-          if (j2.status === 'ok' && j2.items?.length) {
-            const mapped = mapRss2Json(j2);
-            if (mapped.length) {
-              if (!_stories[subj.id]) _stories[subj.id] = {};
-              _stories[subj.id].news = mapped;
-              return;
-            }
-          }
-        }
-      } catch(e) {}
-
-      // Strategy 2: raw RSS via allorigins proxy
+      const q   = encodeURIComponent(subj.label + ' stock market India');
+      const rss = encodeURIComponent('https://news.google.com/rss/search?q=' + q + '&hl=en-IN&gl=IN&ceid=IN:en');
+      const _rssRaw = 'https://news.google.com/rss/search?q=' + encodeURIComponent(subj.label + ' stock market India') + '&hl=en-IN&gl=IN&ceid=IN:en';
       const _rssProxies = [
-        'https://api.allorigins.win/get?url=' + encodeURIComponent(rssUrl),
-        'https://corsproxy.io/?' + encodeURIComponent(rssUrl),
+        'https://api.allorigins.win/get?url=' + encodeURIComponent(_rssRaw),
+        'https://corsproxy.io/?' + encodeURIComponent(_rssRaw),
       ];
+      let j = null;
       for (const _px of _rssProxies) {
         try {
-          const _pr = await fetch(_px, { signal: AbortSignal.timeout(7000) });
+          const _pr = await fetch(_px, {signal: AbortSignal.timeout(7000)});
           if (!_pr.ok) continue;
-          const _raw = await _pr.json().catch(() => null);
-          const _xmlStr = _raw?.contents || '';
-          if (!_xmlStr.includes('<item>')) continue;
-          const _xml = new DOMParser().parseFromString(_xmlStr, 'text/xml');
+          const _raw = await _pr.json();
+          const _xml = new DOMParser().parseFromString(_raw.contents || '', 'text/xml');
           const _items = Array.from(_xml.querySelectorAll('item')).slice(0, 3).map(el => ({
-            title: el.querySelector('title')?.textContent?.trim() || '',
-            link:  el.querySelector('link')?.textContent?.trim() || '#',
-            ago:   typeof timeAgo === 'function' ? timeAgo(el.querySelector('pubDate')?.textContent || '') : '',
-            src:   el.querySelector('source')?.textContent?.trim() || 'Google News',
-          })).filter(i => i.title.length > 10);
-          if (_items.length) {
-            if (!_stories[subj.id]) _stories[subj.id] = {};
-            _stories[subj.id].news = _items;
-            return;
-          }
+            title: el.querySelector('title')?.textContent || '',
+            link:  el.querySelector('link')?.textContent || '#',
+            pubDate: el.querySelector('pubDate')?.textContent || '',
+            author: el.querySelector('source')?.textContent || 'Google News',
+          })).filter(i => i.title.length > 5);
+          if (_items.length) { j = { status: 'ok', items: _items }; break; }
         } catch(e) { continue; }
+      }
+      const r = { ok: !!j };
+      if (r.ok) {
+        if (j.status === 'ok' && j.items?.length) {
+          if (!_stories[subj.id]) _stories[subj.id] = {};
+          _stories[subj.id].news = j.items.slice(0, 3).map(i => ({
+            title: i.title || '',
+            link:  i.link  || '#',
+            ago:   timeAgo(i.pubDate || ''),
+            src:   j.feed?.title || 'Google News',
+          })).filter(n => n.title.length > 10);
+        }
       }
     } catch(e) {}
   }));
