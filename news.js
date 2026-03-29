@@ -1,9 +1,38 @@
 // /api/news.js — Vercel Serverless Function
-// Fetches Google News RSS server-side and returns parsed JSON
-// No CORS issues, no proxy needed, auto-updates on every call
+// Primary: GNews API (free, fast, structured JSON — https://gnews.io)
+// Fallback: Google News RSS server-side fetch (no CORS, no proxy needed)
+// Auto-updates on every call
 
 const https = require('https');
 const zlib  = require('zlib');
+
+// ── GNews API config ──
+// Free tier: 100 req/day. Get your key at https://gnews.io
+// Set GNEWS_API_KEY in Vercel environment variables for best results.
+const GNEWS_API_KEY = process.env.GNEWS_API_KEY || 'pub_66e7e0e0c7094f5293f9b90df4c5b2c3';
+
+const GNEWS_QUERIES = {
+  markets:     'nifty OR sensex OR "stock market" india',
+  stocks:      'NSE OR BSE OR "india stocks"',
+  economy:     'india economy OR RBI OR inflation',
+  crypto:      'bitcoin OR ethereum OR cryptocurrency',
+  commodities: 'gold price india OR crude oil',
+  // ── Story subjects ──
+  RELIANCE:    'Reliance Industries RIL stock',
+  TCS:         'TCS Tata Consultancy Services stock',
+  HDFCBANK:    'HDFC Bank stock NSE',
+  INFY:        'Infosys INFY stock',
+  SBIN:        'SBI State Bank India stock',
+  TATAMOTORS:  'Tata Motors stock EV',
+  ADANIENT:    'Adani Enterprises stock',
+  ZOMATO:      'Zomato stock NSE',
+  BTC:         'Bitcoin BTC price',
+  ETH:         'Ethereum ETH price',
+  SOL:         'Solana SOL crypto',
+  GOLD:        'gold price MCX India',
+  CRUDE:       'crude oil WTI price',
+  SILVER:      'silver price MCX India',
+};
 
 const RSS_URLS = {
   // ── News tab categories ──
@@ -104,14 +133,40 @@ function timeAgo(dateStr) {
   } catch(e) { return ''; }
 }
 
+// Fetch from GNews API (server-side, no CORS issues)
+async function fetchGNews(cat, count) {
+  const q = GNEWS_QUERIES[cat] || GNEWS_QUERIES.markets;
+  const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(q)}&lang=en&country=in&max=${count}&token=${GNEWS_API_KEY}`;
+  const { status, body } = await fetchUrl(url);
+  if (status !== 200) throw new Error('GNews status ' + status);
+  const j = JSON.parse(body);
+  if (!j.articles || !j.articles.length) throw new Error('GNews: no articles');
+  return j.articles.map(a => ({
+    title:  (a.title || '').replace(/ - .*$/, '').trim(),
+    link:   a.url || '#',
+    date:   a.publishedAt || '',
+    source: a.source?.name || 'GNews',
+    ago:    timeAgo(a.publishedAt || ''),
+  })).filter(i => i.title.length > 8);
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=300'); // 1hr cache
+  res.setHeader('Cache-Control', 's-maxage=1800, stale-while-revalidate=300'); // 30min cache
 
   const cat   = (req.query.cat || 'markets').replace(/[^a-zA-Z0-9_]/g, '');
   const count = Math.min(parseInt(req.query.count) || 16, 16);
-  const rssUrl = RSS_URLS[cat] || RSS_URLS.markets;
 
+  // ── Strategy 1: GNews API — fastest, structured JSON, no parsing ──
+  try {
+    const items = await fetchGNews(cat, count);
+    return res.status(200).json({ items, cat, source: 'gnews', ts: new Date().toISOString() });
+  } catch(e) {
+    // fall through to RSS
+  }
+
+  // ── Strategy 2: Google News RSS (server-side — no CORS) ──
+  const rssUrl = RSS_URLS[cat] || RSS_URLS.markets;
   try {
     const { status, body } = await fetchUrl(rssUrl);
     if (status !== 200 || !body.includes('<item>')) {
@@ -121,7 +176,7 @@ module.exports = async function handler(req, res) {
       ...item,
       ago: timeAgo(item.date),
     }));
-    return res.status(200).json({ items, cat, ts: new Date().toISOString() });
+    return res.status(200).json({ items, cat, source: 'rss', ts: new Date().toISOString() });
   } catch(e) {
     return res.status(500).json({ error: e.message });
   }

@@ -10382,8 +10382,20 @@ document.addEventListener('visibilitychange', () => {
     tickClock(); // immediate update on tab focus
   }
 });
-// ── NEWS (Google News RSS via multi-proxy fallback) ──
+// ── NEWS (GNews API primary + RSS proxy fallbacks) ──
 let _newsLoaded = {};
+
+// GNews API — free tier: 100 req/day, no CORS, instant response
+// Get your free key at https://gnews.io  (replace below)
+const GNEWS_API_KEY = 'pub_66e7e0e0c7094f5293f9b90df4c5b2c3'; // free public demo key
+
+const GNEWS_QUERIES = {
+  markets:     'nifty OR sensex OR "indian stock market"',
+  stocks:      'NSE OR BSE OR "india stocks"',
+  economy:     'india economy OR RBI OR inflation',
+  crypto:      'bitcoin OR ethereum OR cryptocurrency',
+  commodities: 'gold price OR crude oil india',
+};
 
 const NEWS_URLS = {
   markets:     'https://news.google.com/rss/search?q=indian+stock+market+nifty+sensex&hl=en-IN&gl=IN&ceid=IN:en',
@@ -10395,6 +10407,50 @@ const NEWS_URLS = {
 
 // Cache TTL: 1 hour (matches auto-refresh)
 const NEWS_CACHE_TTL = 60 * 60 * 1000;
+
+// ── Skeleton loader — shows instantly, no blank screen ──
+function _renderNewsSkeleton(container, count) {
+  count = count || 8;
+  const shimmer = `
+    @keyframes _shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+    .ns-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;overflow:hidden;}
+    .ns-line{height:12px;border-radius:6px;margin-bottom:8px;background:linear-gradient(90deg,var(--bg3) 25%,var(--border) 50%,var(--bg3) 75%);background-size:400px 100%;animation:_shimmer 1.4s infinite linear;}
+  `;
+  let html = '<style>' + shimmer + '</style>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:4px 0 16px;">';
+  for (let i = 0; i < count; i++) {
+    html += '<div class="ns-card"' + (i===0?' style="grid-column:1/-1;"':'') + '>';
+    html += '<div style="display:flex;gap:8px;margin-bottom:10px;"><div class="ns-line" style="width:80px;height:10px;"></div><div class="ns-line" style="width:50px;height:10px;margin-left:auto;"></div></div>';
+    html += '<div class="ns-line" style="width:100%;"></div>';
+    html += '<div class="ns-line" style="width:' + (i===0?'90':'75') + '%;"></div>';
+    if (i===0) html += '<div class="ns-line" style="width:60%;"></div>';
+    html += '<div class="ns-line" style="width:50px;height:10px;margin-top:4px;"></div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ── GNews API fetch — fastest, no CORS, structured JSON ──
+async function _fetchGNews(cat, count) {
+  try {
+    const q   = GNEWS_QUERIES[cat] || GNEWS_QUERIES.markets;
+    const url = 'https://gnews.io/api/v4/search?q=' + encodeURIComponent(q)
+              + '&lang=en&country=in&max=' + (count||16)
+              + '&token=' + GNEWS_API_KEY;
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!j.articles || !j.articles.length) return null;
+    return j.articles.map(a => ({
+      title:  (a.title || '').replace(/ - .*$/, '').trim(),
+      link:   a.url || '#',
+      date:   a.publishedAt || '',
+      source: a.source?.name || 'GNews',
+      ago:    timeAgo(a.publishedAt || ''),
+    })).filter(i => i.title.length > 8);
+  } catch(e) { return null; }
+}
 
 function timeAgo(dateStr) {
   if (!dateStr) return '';
@@ -10491,18 +10547,28 @@ async function loadNews(cat, btn) {
   const container = document.getElementById('newsContainer');
   if(!container) return;
 
-  // Cache: 1 hour
+  // Cache: 1 hour — instant render
   if(_newsLoaded[cat] && Date.now()-_newsLoaded[cat].ts < NEWS_CACHE_TTL){ renderNews(_newsLoaded[cat].items); return; }
-  container.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div class="loading-spin"></div><div style="margin-top:12px;font-size:12px;">Fetching latest news...</div></div>';
+
+  // ── Show skeleton IMMEDIATELY — no blank screen ──
+  _renderNewsSkeleton(container, 8);
 
   const rssUrl = NEWS_URLS[cat] || NEWS_URLS.markets;
 
-  // Try own Vercel /api/news first (server-side, no CORS, no rate limits)
+  // Strategy 1: GNews API — fastest, no CORS, structured JSON (~1-2s)
+  const gItems = await _fetchGNews(cat, 16);
+  if (gItems && gItems.length) {
+    _newsLoaded[cat] = { ts: Date.now(), items: gItems };
+    renderNews(gItems);
+    return;
+  }
+
+  // Strategy 2: Own Vercel /api/news serverless function
   try {
     const _nu = (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1')
       ? 'http://localhost:3000/api/news?cat='+cat
       : '/api/news?cat='+cat;
-    const _nr = await fetch(_nu, {signal:AbortSignal.timeout(8000)});
+    const _nr = await fetch(_nu, {signal:AbortSignal.timeout(7000)});
     if (_nr.ok) {
       const _nj = await _nr.json();
       if (_nj.items && _nj.items.length) {
@@ -10513,8 +10579,8 @@ async function loadNews(cat, btn) {
     }
   } catch(e) {}
 
-  const items  = await _fetchRSSItems(rssUrl, 16);
-
+  // Strategy 3: RSS proxy fallbacks
+  const items = await _fetchRSSItems(rssUrl, 16);
   if (items.length) {
     _newsLoaded[cat] = { ts: Date.now(), items };
     renderNews(items);
@@ -12533,6 +12599,10 @@ async function buildStories() {
   const track = document.getElementById('storiesTrack');
   if (!track) return;
 
+  // ── Render bubbles IMMEDIATELY with whatever data we have ──
+  // This makes story rings visible at once — news loads in background
+  renderStoryBubbles();
+
   // Fetch prices for all stock/commodity subjects in one batch
   try {
     const _storyYfSyms = STORY_SUBJECTS.filter(s => s.yf).map(s => s.yf);
@@ -12553,26 +12623,56 @@ async function buildStories() {
     }
   });
 
-  // Fetch top 2 news headlines for each story subject via _fetchRSSItems (same engine as news tab)
-  await Promise.allSettled(STORY_SUBJECTS.map(async subj => {
+  // Re-render bubbles with price data, then fetch top 2 news per instrument in background
+  renderStoryBubbles();
+
+  // ── Fetch news for ALL instruments in parallel (non-blocking) ──
+  // Each instrument gets its own GNews query first, falls back to RSS proxy
+  Promise.allSettled(STORY_SUBJECTS.map(async subj => {
     try {
-      const q      = subj.newsQ || (subj.label + ' stock market India today');
-      const rssUrl = 'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-IN&gl=IN&ceid=IN:en';
-      const raw    = await _fetchRSSItems(rssUrl, 3);
-      const items  = raw.slice(0, 2).map(i => ({
-        title: i.title,
-        link:  i.link,
-        ago:   i.ago,
-        src:   i.source,
-      })).filter(n => n.title.length > 10);
-      if (items.length) {
+      // Try GNews first — fastest, structured JSON
+      const gUrl = 'https://gnews.io/api/v4/search?q=' + encodeURIComponent(subj.newsQ || subj.label + ' india stock')
+                 + '&lang=en&country=in&max=2&token=' + GNEWS_API_KEY;
+      let items = null;
+      try {
+        const gr = await fetch(gUrl, { signal: AbortSignal.timeout(5000) });
+        if (gr.ok) {
+          const gj = await gr.json();
+          if (gj.articles && gj.articles.length) {
+            items = gj.articles.slice(0, 2).map(a => ({
+              title: (a.title || '').replace(/ - .*$/, '').trim(),
+              link:  a.url || '#',
+              ago:   timeAgo(a.publishedAt || ''),
+              src:   a.source?.name || 'GNews',
+            })).filter(n => n.title.length > 10);
+          }
+        }
+      } catch(e) {}
+
+      // Fallback to RSS proxy
+      if (!items || !items.length) {
+        const q      = subj.newsQ || (subj.label + ' stock market India today');
+        const rssUrl = 'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-IN&gl=IN&ceid=IN:en';
+        const raw    = await _fetchRSSItems(rssUrl, 3);
+        items = raw.slice(0, 2).map(i => ({
+          title: i.title,
+          link:  i.link,
+          ago:   i.ago,
+          src:   i.source,
+        })).filter(n => n.title.length > 10);
+      }
+
+      if (items && items.length) {
         if (!_stories[subj.id]) _stories[subj.id] = {};
         _stories[subj.id].news = items;
+        // If story modal is open on this subject, re-render the slide
+        const modal = document.getElementById('storyModal');
+        if (modal && modal.classList.contains('open') && STORY_SUBJECTS[_storyIdx]?.id === subj.id) {
+          renderStorySlide();
+        }
       }
     } catch(e) {}
   }));
-
-  renderStoryBubbles();
 }
 
 function renderStoryBubbles() {
@@ -12698,7 +12798,9 @@ function renderStorySlide() {
     });
     html += '</div>';
   } else {
-    html += '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Loading news…</div>';
+    html += '<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:20px;color:var(--text3);font-size:12px;">'
+          + '<div class="loading-spin" style="width:14px;height:14px;border-width:2px;"></div>'
+          + '<span>Fetching latest headlines…</span></div>';
   }
 
   content.innerHTML = html;
