@@ -12,7 +12,7 @@ const RSS_URLS = {
   economy:     'https://news.google.com/rss/search?q=india+economy+RBI+inflation+2026&hl=en-IN&gl=IN&ceid=IN:en',
   crypto:      'https://news.google.com/rss/search?q=bitcoin+crypto+cryptocurrency+today&hl=en-IN&gl=IN&ceid=IN:en',
   commodities: 'https://news.google.com/rss/search?q=gold+price+crude+oil+india+today&hl=en-IN&gl=IN&ceid=IN:en',
-  // ── Story subjects (used by buildStories) ──
+  // ── Story subjects ──
   RELIANCE:    'https://news.google.com/rss/search?q=Reliance+Industries+RIL+NSE+stock+today&hl=en-IN&gl=IN&ceid=IN:en',
   TCS:         'https://news.google.com/rss/search?q=TCS+Tata+Consultancy+Services+stock+NSE+today&hl=en-IN&gl=IN&ceid=IN:en',
   HDFCBANK:    'https://news.google.com/rss/search?q=HDFC+Bank+stock+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
@@ -106,9 +106,9 @@ function timeAgo(dateStr) {
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=7200, stale-while-revalidate=300'); // 2hr cache
+  res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=300'); // 1hr cache
 
-  const cat   = (req.query.cat || 'markets').replace(/[^a-zA-Z]/g, '');
+  const cat   = (req.query.cat || 'markets').replace(/[^a-zA-Z0-9_]/g, '');
   const count = Math.min(parseInt(req.query.count) || 16, 16);
   const rssUrl = RSS_URLS[cat] || RSS_URLS.markets;
 
