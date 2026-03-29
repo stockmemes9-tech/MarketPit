@@ -1989,7 +1989,7 @@ header {
     </button>
 
     <!-- 2. Search -->
-    <button class="bn-item" id="bn-screener" onclick="switchTabMobile(this,'screener')" aria-label="Screener">
+    <button class="bn-item" id="bn-search" onclick="openMobileSearch()" aria-label="Search">
       <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
       <svg class="ic-filled" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
     </button>
@@ -2012,141 +2012,8 @@ header {
       <svg class="ic-filled" viewBox="0 0 24 24" fill="var(--text)" stroke="none"><path d="M20 2H4a2 2 0 00-2 2v13.5L6.5 13H20a2 2 0 002-2V4a2 2 0 00-2-2z"/></svg>
     </button>
 
-    <!-- 6. Search -->
-    <button class="bn-item" id="bn-search" onclick="openMobileSearch()" aria-label="Search">
-      <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
-      <svg class="ic-filled" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
-    </button>
-
   </div>
 </div>
-
-<!-- ══ MOBILE SEARCH OVERLAY ══ -->
-<div id="mpMobSearch" onclick="if(event.target===this)closeMobileSearch()"
-  style="display:none;position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding-top:56px;">
-  <div style="width:calc(100% - 24px);max-width:500px;background:var(--bg2);border:1px solid var(--border2);border-radius:16px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.4);" onclick="event.stopPropagation()">
-    <!-- Input row -->
-    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
-      <input id="mpMobSearchInput" type="search" autocomplete="off" autocorrect="off" spellcheck="false"
-        placeholder="Search posts, people, stocks…"
-        style="flex:1;border:none;background:transparent;color:var(--text);font-size:15px;font-family:'DM Sans',sans-serif;outline:none;"
-        oninput="mpMobSearchRun(this.value)"
-        onkeydown="if(event.key==='Escape')closeMobileSearch()">
-      <button onclick="closeMobileSearch()" style="border:none;background:none;cursor:pointer;color:var(--text3);font-size:20px;line-height:1;padding:0 4px;">✕</button>
-    </div>
-    <!-- Results -->
-    <div id="mpMobSearchResults" style="max-height:60vh;overflow-y:auto;">
-      <div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>
-    </div>
-  </div>
-</div>
-
-<script>
-(function(){
-  function openMobileSearch() {
-    const el = document.getElementById('mpMobSearch');
-    if (!el) return;
-    el.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-    document.querySelectorAll('.bn-item').forEach(b => b.classList.remove('active'));
-    document.getElementById('bn-search').classList.add('active');
-    setTimeout(() => { const i = document.getElementById('mpMobSearchInput'); if (i) i.focus(); }, 60);
-  }
-  function closeMobileSearch() {
-    const el = document.getElementById('mpMobSearch');
-    if (el) el.style.display = 'none';
-    document.body.style.overflow = '';
-    const i = document.getElementById('mpMobSearchInput');
-    if (i) i.value = '';
-    const r = document.getElementById('mpMobSearchResults');
-    if (r) r.innerHTML = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>';
-    document.getElementById('bn-search').classList.remove('active');
-  }
-
-  function mpMobSearchRun(q) {
-    const r = document.getElementById('mpMobSearchResults');
-    if (!r) return;
-    const ql = (q || '').trim().toLowerCase();
-    if (!ql) {
-      r.innerHTML = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>';
-      return;
-    }
-
-    let html = '';
-
-    // ── People (post authors) ──
-    const posts = (typeof getPosts === 'function') ? getPosts() : [];
-    const people = [...new Set(posts.map(p => p.author).filter(Boolean))]
-      .filter(a => a.toLowerCase().includes(ql)).slice(0, 4);
-    if (people.length) {
-      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">PEOPLE</div>';
-      people.forEach(name => {
-        const initials = name.slice(0,2).toUpperCase();
-        html += `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
-          onclick="closeMobileSearch();openUserProfile('${name.replace(/'/g,"\\'")}');"
-          onmousedown="event.preventDefault()">
-          <div style="width:36px;height:36px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0;">${initials}</div>
-          <div>
-            <div style="font-size:14px;font-weight:700;color:var(--text);">${name}</div>
-            <div style="font-size:11px;color:var(--text3);">@${name.toLowerCase().replace(/\s+/g,'')}</div>
-          </div>
-        </div>`;
-      });
-    }
-
-    // ── Posts ──
-    const matchedPosts = posts.filter(p => p.text && p.text.toLowerCase().includes(ql)).slice(0, 5);
-    if (matchedPosts.length) {
-      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">POSTS</div>';
-      matchedPosts.forEach(p => {
-        const snippet = p.text.slice(0, 100) + (p.text.length > 100 ? '…' : '');
-        const hi = snippet.replace(new RegExp('(' + ql.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi'), '<mark style="background:var(--accent);color:#fff;border-radius:2px;padding:0 2px;">$1</mark>');
-        html += `<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
-          onclick="closeMobileSearch();switchTabMobile(document.getElementById('bn-feed'),'feed');setTimeout(()=>{const el=document.getElementById('post-${p.id}');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});},400);"
-          onmousedown="event.preventDefault()">
-          <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:3px;">@${p.author||'Unknown'}</div>
-          <div style="font-size:13px;color:var(--text);line-height:1.4;">${hi}</div>
-        </div>`;
-      });
-    }
-
-    // ── Stocks / Crypto / Commodities ──
-    const stockList  = (typeof allStockSymbols !== 'undefined') ? allStockSymbols : [];
-    const cryptoList = (typeof CRYPTO_LIST !== 'undefined') ? CRYPTO_LIST : [];
-    const commList   = (typeof COMM_LIST !== 'undefined') ? COMM_LIST : [];
-    const instruments = [
-      ...stockList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,4),
-      ...cryptoList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,2),
-      ...commList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,2),
-    ].slice(0, 6);
-    if (instruments.length) {
-      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">STOCKS & MARKETS</div>';
-      instruments.forEach(s => {
-        const bc = s.bc || 'var(--accent)';
-        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
-          onclick="closeMobileSearch();if(typeof openStockModal==='function')openStockModal('${s.sym}','${(s.name||s.sym).replace(/'/g,"\\'")}');"
-          onmousedown="event.preventDefault()">
-          <div>
-            <div style="font-family:Space Mono,monospace;font-size:12px;font-weight:700;color:var(--text);">${s.sym}</div>
-            <div style="font-size:11px;color:var(--text3);">${s.name||''}</div>
-          </div>
-          <span style="font-size:9px;color:${bc};border:1px solid ${bc}44;border-radius:4px;padding:2px 6px;">${s.badge||''}</span>
-        </div>`;
-      });
-    }
-
-    if (!html) {
-      html = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">No results for "<strong>' + ql + '</strong>"</div>';
-    }
-    r.innerHTML = html;
-  }
-
-  window.openMobileSearch  = openMobileSearch;
-  window.closeMobileSearch = closeMobileSearch;
-  window.mpMobSearchRun    = mpMobSearchRun;
-})();
-</script>
 
 <!-- MOBILE COMPOSE MODAL (Twitter-style bottom sheet) -->
 <div id="mobileComposeModal" onclick="if(event.target===this)closeMobileCompose()">
@@ -13691,5 +13558,110 @@ setInterval(_syncMobileTrending, 30000);
   };
 })();
 </script>
+<!-- ══ MOBILE SEARCH OVERLAY (mobile only) ══ -->
+<div id="mpMobSearch" onclick="if(event.target===this)closeMobileSearch()"
+  style="display:none;position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding-top:56px;">
+  <div style="width:calc(100% - 24px);max-width:500px;background:var(--bg2);border:1px solid var(--border2);border-radius:16px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.4);" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
+      <input id="mpMobSearchInput" type="search" autocomplete="off" autocorrect="off" spellcheck="false"
+        placeholder="Search posts, people, stocks…"
+        style="flex:1;border:none;background:transparent;color:var(--text);font-size:15px;font-family:'DM Sans',sans-serif;outline:none;"
+        oninput="mpMobSearchRun(this.value)"
+        onkeydown="if(event.key==='Escape')closeMobileSearch()">
+      <button onclick="closeMobileSearch()" style="border:none;background:none;cursor:pointer;color:var(--text3);font-size:20px;line-height:1;padding:0 4px;">✕</button>
+    </div>
+    <div id="mpMobSearchResults" style="max-height:60vh;overflow-y:auto;">
+      <div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  function openMobileSearch() {
+    const el = document.getElementById('mpMobSearch');
+    if (!el) return;
+    el.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    document.querySelectorAll('.bn-item').forEach(b => b.classList.remove('active'));
+    const btn = document.getElementById('bn-search');
+    if (btn) btn.classList.add('active');
+    setTimeout(() => { const i = document.getElementById('mpMobSearchInput'); if (i) i.focus(); }, 60);
+  }
+  function closeMobileSearch() {
+    const el = document.getElementById('mpMobSearch');
+    if (el) el.style.display = 'none';
+    document.body.style.overflow = '';
+    const i = document.getElementById('mpMobSearchInput');
+    if (i) i.value = '';
+    const r = document.getElementById('mpMobSearchResults');
+    if (r) r.innerHTML = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>';
+    const btn = document.getElementById('bn-search');
+    if (btn) btn.classList.remove('active');
+  }
+  function mpMobSearchRun(q) {
+    const r = document.getElementById('mpMobSearchResults');
+    if (!r) return;
+    const ql = (q || '').trim().toLowerCase();
+    if (!ql) { r.innerHTML = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">Search for posts, people or stocks</div>'; return; }
+    let html = '';
+    // People
+    const posts = (typeof getPosts === 'function') ? getPosts() : [];
+    const people = [...new Set(posts.map(p => p.author).filter(Boolean))].filter(a => a.toLowerCase().includes(ql)).slice(0, 4);
+    if (people.length) {
+      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">PEOPLE</div>';
+      people.forEach(name => {
+        html += `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
+          onclick="closeMobileSearch();if(typeof openUserProfile==='function')openUserProfile('${name.replace(/'/g,"\\'")}');" onmousedown="event.preventDefault()">
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0;">${name.slice(0,2).toUpperCase()}</div>
+          <div><div style="font-size:14px;font-weight:700;color:var(--text);">${name}</div><div style="font-size:11px;color:var(--text3);">@${name.toLowerCase().replace(/\s+/g,'')}</div></div>
+        </div>`;
+      });
+    }
+    // Posts
+    const matchedPosts = posts.filter(p => p.text && p.text.toLowerCase().includes(ql)).slice(0, 5);
+    if (matchedPosts.length) {
+      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">POSTS</div>';
+      matchedPosts.forEach(p => {
+        const snippet = (p.text || '').slice(0, 100) + (p.text && p.text.length > 100 ? '…' : '');
+        const safe = ql.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+        const hi = snippet.replace(new RegExp('(' + safe + ')', 'gi'), '<mark style="background:var(--accent);color:#fff;border-radius:2px;padding:0 2px;">$1</mark>');
+        html += `<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
+          onclick="closeMobileSearch();switchTabMobile(document.getElementById('bn-feed'),'feed');setTimeout(()=>{const el=document.getElementById('post-${p.id}');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});},400);" onmousedown="event.preventDefault()">
+          <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:3px;">@${p.author||'Unknown'}</div>
+          <div style="font-size:13px;color:var(--text);line-height:1.4;">${hi}</div>
+        </div>`;
+      });
+    }
+    // Stocks / Crypto / Commodities
+    const stockList  = (typeof allStockSymbols !== 'undefined') ? allStockSymbols : [];
+    const cryptoList = (typeof CRYPTO_LIST !== 'undefined') ? CRYPTO_LIST : [];
+    const commList   = (typeof COMM_LIST !== 'undefined') ? COMM_LIST : [];
+    const instruments = [
+      ...stockList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,4),
+      ...cryptoList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,2),
+      ...commList.filter(s => s.sym.toLowerCase().includes(ql) || (s.name||'').toLowerCase().includes(ql)).slice(0,2),
+    ].slice(0,6);
+    if (instruments.length) {
+      html += '<div style="padding:8px 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text3);font-family:Space Mono,monospace;">STOCKS & MARKETS</div>';
+      instruments.forEach(s => {
+        const bc = s.bc || 'var(--accent)';
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);"
+          onclick="closeMobileSearch();if(typeof openStockModal==='function')openStockModal('${s.sym}','${(s.name||s.sym).replace(/'/g,"\\'")}');" onmousedown="event.preventDefault()">
+          <div><div style="font-family:Space Mono,monospace;font-size:12px;font-weight:700;color:var(--text);">${s.sym}</div><div style="font-size:11px;color:var(--text3);">${s.name||''}</div></div>
+          <span style="font-size:9px;color:${bc};border:1px solid ${bc}44;border-radius:4px;padding:2px 6px;">${s.badge||''}</span>
+        </div>`;
+      });
+    }
+    if (!html) html = '<div style="padding:28px 16px;text-align:center;color:var(--text3);font-size:13px;">No results for "<strong>' + ql + '</strong>"</div>';
+    r.innerHTML = html;
+  }
+  window.openMobileSearch  = openMobileSearch;
+  window.closeMobileSearch = closeMobileSearch;
+  window.mpMobSearchRun    = mpMobSearchRun;
+})();
+</script>
+
 </body>
 </html>
