@@ -12499,7 +12499,7 @@ async function buildStories() {
     }
   });
 
-  // Fetch news for each story subject — rss2json first, proxy fallback
+  // Fetch news for each story subject — own Vercel /api/news first, then proxy fallbacks
   await Promise.allSettled(STORY_SUBJECTS.map(async subj => {
     try {
       const q = subj.newsQ || (subj.label + ' stock market India today');
@@ -12513,7 +12513,29 @@ async function buildStories() {
         src:   (j.feed?.title || i.author || 'Google News').replace(/ - .*$/, '').slice(0, 35),
       })).filter(n => n.title.length > 10);
 
-      // Strategy 1: rss2json — no CORS, works everywhere
+      // Strategy 1: /api/news — own Vercel function, server-side, most reliable
+      try {
+        const _newsApiBase = (typeof API_BASE !== 'undefined' ? API_BASE.replace('/api','') : '');
+        const rn = await fetch(_newsApiBase + '/api/news?cat=' + encodeURIComponent(subj.id) + '&count=3', { signal: AbortSignal.timeout(8000) });
+        if (rn.ok) {
+          const jn = await rn.json();
+          if (jn.items && jn.items.length) {
+            const mapped = jn.items.slice(0, 3).map(i => ({
+              title: (i.title || '').trim(),
+              link:  i.link || '#',
+              ago:   i.ago || (typeof timeAgo === 'function' ? timeAgo(i.date || '') : ''),
+              src:   i.source || 'Google News',
+            })).filter(n => n.title.length > 10);
+            if (mapped.length) {
+              if (!_stories[subj.id]) _stories[subj.id] = {};
+              _stories[subj.id].news = mapped;
+              return;
+            }
+          }
+        }
+      } catch(e) {}
+
+      // Strategy 2: rss2json — fallback
       try {
         const api = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(rssUrl) + '&count=3';
         const r2 = await fetch(api, { signal: AbortSignal.timeout(10000) });
@@ -12530,7 +12552,7 @@ async function buildStories() {
         }
       } catch(e) {}
 
-      // Strategy 2: allorigins proxy → raw RSS XML
+      // Strategy 3: allorigins proxy → raw RSS XML
       try {
         const px = 'https://api.allorigins.win/get?url=' + encodeURIComponent(rssUrl);
         const pr = await fetch(px, { signal: AbortSignal.timeout(8000) });
@@ -12554,7 +12576,7 @@ async function buildStories() {
         }
       } catch(e) {}
 
-      // Strategy 3: corsproxy fallback
+      // Strategy 4: corsproxy fallback
       try {
         const px2 = 'https://corsproxy.io/?' + encodeURIComponent(rssUrl);
         const pr2 = await fetch(px2, { signal: AbortSignal.timeout(8000) });

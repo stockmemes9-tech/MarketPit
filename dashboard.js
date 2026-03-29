@@ -8345,7 +8345,16 @@ async function loadNews(cat, btn) {
 
   const rssUrl = NEWS_RSS_URLS[cat] || NEWS_RSS_URLS.markets;
 
-  // Strategy 1: allorigins (no rate limit, no CORS issues)
+  // Strategy 1: /api/news — own Vercel function, server-side fetch, most reliable
+  try {
+    const r = await fetch(API_BASE.replace('/api', '') + '/api/news?cat=' + cat, { signal: AbortSignal.timeout(10000) });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.items && j.items.length) { _newsLoaded[cat] = { ts: Date.now(), items: j.items }; renderNews(j.items); return; }
+    }
+  } catch(e) {}
+
+  // Strategy 2: allorigins (no rate limit, no CORS issues)
   try {
     const px = 'https://api.allorigins.win/get?url=' + encodeURIComponent(rssUrl);
     const r = await fetch(px, { signal: AbortSignal.timeout(10000) });
