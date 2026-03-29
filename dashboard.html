@@ -1817,7 +1817,7 @@ header {
   <div class="main-feed" id="page-mmi" style="display:none;flex-direction:column;">
     <div style="padding:12px 18px;border-bottom:1px solid var(--border);flex-shrink:0;">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:2px;">😊 MARKET MOOD INDEX</div>
-      <div style="font-size:10px;color:var(--text3);font-family:'Space Mono',monospace;">India VIX · Nifty Breadth · Put-Call Ratio · FII Activity</div>
+      <div style="font-size:10px;color:var(--text3);font-family:'Space Mono',monospace;">India VIX · Nifty Breadth · Put-Call Ratio</div>
     </div>
     <div class="feed-scroll" id="mmiBody" style="padding:16px;"></div>
   </div>
@@ -1969,10 +1969,6 @@ header {
     <div id="mobileTrendingRight" class="mobile-only" style="padding:8px 10px;border-bottom:1px solid var(--border);flex-shrink:0;">
       <div style="font-family:'Space Mono',monospace;font-size:9px;font-weight:700;color:var(--text);letter-spacing:1px;margin-bottom:6px;">📈 TRENDING NOW</div>
       <div id="mobileTrendingMirror" style="max-height:200px;overflow-y:auto;"></div>
-    </div>
-    <div class="leaderboard-section">
-      <div class="lb-title">TOP CALLERS THIS WEEK</div>
-      <div id="leaderboard"><div style="color:var(--text3);font-size:11px;">No activity yet — start posting!</div></div>
     </div>
   </div>
 </div>
@@ -10007,12 +10003,6 @@ function renderSidebarMmi() {
     else if (spread < -0.5) { score -= 7;  signals.push({ label:'Bank Nifty', val:bc.toFixed(2)+'%',                col:'#ff6d00' }); }
     else                    {              signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', col:'#ffd740' }); }
   }
-  if (fii?.fii_net != null) {
-    const f = fii.fii_net;
-    if      (f >  2000) { score += 12; signals.push({ label:'FII Flow', val:'₹'+Math.abs(f).toFixed(0)+' Cr', col:'#00c853' }); }
-    else if (f >  0)    { score += 6;  signals.push({ label:'FII Flow', val:'₹'+f.toFixed(0)+' Cr',           col:'#69f0ae' }); }
-    else if (f > -2000) { score -= 6;  signals.push({ label:'FII Flow', val:'₹'+f.toFixed(0)+' Cr',           col:'#ff6d00' }); }
-    else                { score -= 12; signals.push({ label:'FII Flow', val:'₹'+f.toFixed(0)+' Cr',           col:'#ff3b3b' }); }
   }
 
   score = Math.max(0, Math.min(100, score));
@@ -10148,15 +10138,6 @@ function _calcMoodScore(data) {
     else if (c > 0)  { score += 7;  signals.push({label:'Nifty 50',   val:'+'+c.toFixed(2)+'%',           mood:'Mildly Bullish', col:'#69f0ae'}); }
     else if (c > -1) { score -= 7;  signals.push({label:'Nifty 50',   val:c.toFixed(2)+'%',               mood:'Mildly Bearish', col:'#ff6d00'}); }
     else             { score -= 15; signals.push({label:'Nifty 50',   val:c.toFixed(2)+'%',               mood:'Bearish', col:'#d50000'}); }
-  }
-
-  // FII flow
-  if (data.fii?.fii_net != null) {
-    const f = data.fii.fii_net;
-    if (f > 2000)        { score += 15; signals.push({label:'FII Flow',  val:'₹'+Math.abs(f).toFixed(0)+' Cr', mood:'Strong Buying',  col:'#00c853'}); }
-    else if (f > 0)      { score += 7;  signals.push({label:'FII Flow',  val:'₹'+f.toFixed(0)+' Cr',           mood:'Net Buying',     col:'#69f0ae'}); }
-    else if (f > -2000)  { score -= 7;  signals.push({label:'FII Flow',  val:'₹'+f.toFixed(0)+' Cr',           mood:'Net Selling',    col:'#ff6d00'}); }
-    else                 { score -= 15; signals.push({label:'FII Flow',  val:'₹'+f.toFixed(0)+' Cr',           mood:'Heavy Selling',  col:'#d50000'}); }
   }
 
   // Bank Nifty vs Nifty (banking sector strength)
@@ -10442,6 +10423,34 @@ function _parseRSSText(text, limit) {
 
 // Fetch RSS via a chain of CORS proxies → returns parsed items or []
 async function _fetchRSSItems(rssUrl, limit) {
+  // 0. /api/news — own Vercel serverless function (server-side fetch, no CORS, no rate limits)
+  try {
+    // Extract the search query from the RSS URL to use as cat param, fallback to 'markets'
+    const _qMatch = rssUrl.match(/[?&]q=([^&]+)/);
+    const _qRaw   = _qMatch ? decodeURIComponent(_qMatch[1].replace(/\+/g,' ')) : '';
+    // Find matching cat key from NEWS_URLS or story subjects
+    let _apiCat = 'markets';
+    if (typeof NEWS_URLS !== 'undefined') {
+      for (const [k, v] of Object.entries(NEWS_URLS)) { if (v === rssUrl) { _apiCat = k; break; } }
+    }
+    const _newsApiUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:3000/api/news?cat=' + encodeURIComponent(_apiCat) + '&count=' + (limit||16)
+      : '/api/news?cat=' + encodeURIComponent(_apiCat) + '&count=' + (limit||16);
+    const r0 = await fetch(_newsApiUrl, { signal: AbortSignal.timeout(8000) });
+    if (r0.ok) {
+      const j0 = await r0.json();
+      if (j0.items && j0.items.length) {
+        return j0.items.slice(0, limit||16).map(i => ({
+          title:  (i.title || '').trim(),
+          link:   i.link || '#',
+          date:   i.date || '',
+          source: i.source || 'Google News',
+          ago:    i.ago || timeAgo(i.date || ''),
+        })).filter(i => i.title.length > 8);
+      }
+    }
+  } catch(e) {}
+
   // 1. rss2json.com — most reliable free public RSS-to-JSON API
   try {
     const r = await fetch(

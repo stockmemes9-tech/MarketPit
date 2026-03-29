@@ -8345,9 +8345,12 @@ async function loadNews(cat, btn) {
 
   const rssUrl = NEWS_RSS_URLS[cat] || NEWS_RSS_URLS.markets;
 
-  // Strategy 1: /api/news — own Vercel function, server-side fetch, most reliable
+  // Strategy 1: /api/news — own Vercel serverless function, most reliable
   try {
-    const r = await fetch(API_BASE.replace('/api', '') + '/api/news?cat=' + cat, { signal: AbortSignal.timeout(10000) });
+    const _newsUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:3000/api/news?cat=' + cat
+      : '/api/news?cat=' + cat;
+    const r = await fetch(_newsUrl, { signal: AbortSignal.timeout(10000) });
     if (r.ok) {
       const j = await r.json();
       if (j.items && j.items.length) { _newsLoaded[cat] = { ts: Date.now(), items: j.items }; renderNews(j.items); return; }
