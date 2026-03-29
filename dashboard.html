@@ -5451,11 +5451,12 @@ function applySettings(s) {
     if (ticker) ticker.style.background = isDark ? 'rgba(0,0,0,0.3)' : 'transparent';
   } catch(e) {}
   const body = document.body;
-  // Theme — light is default (no class), dim and dark get a class
+  // Theme — dim is default, dark gets dark class, light gets light class
   body.classList.remove('theme-dim','theme-dark');
-  if (s.theme === 'dim')  body.classList.add('theme-dim');
-  if (s.theme === 'dark') body.classList.add('theme-dark');
-  // light = no class needed (root CSS is light by default)
+  const resolvedTheme = s.theme || 'dim';
+  if (resolvedTheme === 'dim')  body.classList.add('theme-dim');
+  if (resolvedTheme === 'dark') body.classList.add('theme-dark');
+  // light = no class needed (root CSS is light)
   // Accent
   body.classList.remove('accent-blue','accent-yellow','accent-pink','accent-purple','accent-orange','accent-green');
   if (s.accent) body.classList.add('accent-' + s.accent);
@@ -5550,7 +5551,7 @@ function renderSettings(page) {
 
   } else if (page === 'display') {
     title.textContent = 'DISPLAY';
-    const curTheme  = s.theme  || 'light';
+    const curTheme  = s.theme  || 'dim';
     const curAccent = s.accent || 'blue';
     const curFont   = s.fontSize || 'normal';
     el.innerHTML = `
