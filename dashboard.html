@@ -3005,7 +3005,7 @@ setInterval(_fetchAllMovers, 30000);
 setInterval(updateTickerFromLive, 20000);
 // Refresh sidebar every 15 seconds
 setInterval(() => renderTrending(liveStocks), 15000);
-// Auto-refresh news every 1 hour (cache TTL matches — always fetches fresh on schedule)
+// Auto-refresh news every 15 minutes — live feel, cache TTL matches
 setInterval(() => {
   if (window._activePage === 'news') {
     const activeBtn = document.querySelector('#newsCatBtns button[style*="accent"]');
@@ -3013,9 +3013,9 @@ setInterval(() => {
     delete _newsLoaded[cat]; // clear cache so fresh fetch runs
     loadNews(cat, activeBtn);
   }
-  // Also refresh stories news in background every hour
+  // Also refresh stories news in background every 15 min
   if (typeof buildStories === 'function') buildStories();
-}, 60 * 60 * 1000);
+}, 15 * 60 * 1000);
 setInterval(() => { try { renderTrending(liveStocks); } catch(e) {} }, 15000);
 let _cryptoFetching = false;
 async function fetchCryptoLive() {
@@ -10402,8 +10402,8 @@ const NEWS_URLS = {
   commodities: 'https://news.google.com/rss/search?q=gold+price+crude+oil+india+today&hl=en-IN&gl=IN&ceid=IN:en',
 };
 
-// Cache TTL: 1 hour (matches auto-refresh)
-const NEWS_CACHE_TTL = 60 * 60 * 1000;
+// Cache TTL: 15 minutes — live feel without hammering proxies
+const NEWS_CACHE_TTL = 15 * 60 * 1000;
 
 // ── Skeleton loader — shows instantly, no blank screen ──
 function _renderNewsSkeleton(container, count) {
@@ -10531,23 +10531,23 @@ async function loadNews(cat, btn) {
 
   const rssUrl = NEWS_URLS[cat] || NEWS_URLS.markets;
 
-  // Strategy 1: Own Vercel /api/news — server-side RSS fetch, no CORS, most reliable
-  try {
-    const _nu = (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1')
-      ? 'http://localhost:3000/api/news?cat='+cat
-      : '/api/news?cat='+cat;
-    const _nr = await fetch(_nu, {signal:AbortSignal.timeout(9000)});
-    if (_nr.ok) {
-      const _nj = await _nr.json();
-      if (_nj.items && _nj.items.length) {
-        _newsLoaded[cat] = {ts:Date.now(), items:_nj.items};
-        renderNews(_nj.items);
-        return;
+  // Strategy 1: Own Vercel /api/news — only when running on localhost (not GitHub Pages)
+  const _isLocalhost = (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1');
+  if (_isLocalhost) {
+    try {
+      const _nr = await fetch('http://localhost:3000/api/news?cat='+cat, {signal:AbortSignal.timeout(5000)});
+      if (_nr.ok) {
+        const _nj = await _nr.json();
+        if (_nj.items && _nj.items.length) {
+          _newsLoaded[cat] = {ts:Date.now(), items:_nj.items};
+          renderNews(_nj.items);
+          return;
+        }
       }
-    }
-  } catch(e) {}
+    } catch(e) {}
+  }
 
-  // Strategy 2: RSS proxy fallbacks (client-side)
+  // Strategy 2: RSS proxy fallbacks (client-side) — primary path on GitHub Pages
   const items = await _fetchRSSItems(rssUrl, 16);
   if (items.length) {
     _newsLoaded[cat] = { ts: Date.now(), items };
@@ -12603,24 +12603,23 @@ async function buildStories() {
     try {
       let items = null;
 
-      // Strategy 1: /api/news?cat=SYMBOL — server-side RSS, most reliable
-      try {
-        const apiUrl = (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1')
-          ? 'http://localhost:3000/api/news?cat=' + subj.id + '&count=2'
-          : '/api/news?cat=' + subj.id + '&count=2';
-        const r = await fetch(apiUrl, { signal: AbortSignal.timeout(9000) });
-        if (r.ok) {
-          const j = await r.json();
-          if (j.items && j.items.length) {
-            items = j.items.slice(0, 2).map(i => ({
-              title: i.title,
-              link:  i.link,
-              ago:   i.ago,
-              src:   i.source,
-            })).filter(n => n.title.length > 10);
+      // Strategy 1: /api/news — only when on localhost
+      if (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1') {
+        try {
+          const r = await fetch('http://localhost:3000/api/news?cat=' + subj.id + '&count=2', { signal: AbortSignal.timeout(5000) });
+          if (r.ok) {
+            const j = await r.json();
+            if (j.items && j.items.length) {
+              items = j.items.slice(0, 2).map(i => ({
+                title: i.title,
+                link:  i.link,
+                ago:   i.ago,
+                src:   i.source,
+              })).filter(n => n.title.length > 10);
+            }
           }
-        }
-      } catch(e) {}
+        } catch(e) {}
+      }
 
       // Strategy 2: RSS proxy fallback (client-side)
       if (!items || !items.length) {
