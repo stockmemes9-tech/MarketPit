@@ -1,42 +1,38 @@
 // /api/news.js — Vercel Serverless Function
 // Fetches Google News RSS server-side → no CORS, no proxies needed
-// Supports both news tab categories AND story instrument symbols
 
 const https = require('https');
 const zlib  = require('zlib');
 
 const RSS_URLS = {
-  // ── News tab categories ──
   markets:     'https://news.google.com/rss/search?q=indian+stock+market+nifty+sensex&hl=en-IN&gl=IN&ceid=IN:en',
   stocks:      'https://news.google.com/rss/search?q=NSE+BSE+india+stocks+today&hl=en-IN&gl=IN&ceid=IN:en',
   economy:     'https://news.google.com/rss/search?q=india+economy+RBI+inflation+2026&hl=en-IN&gl=IN&ceid=IN:en',
   crypto:      'https://news.google.com/rss/search?q=bitcoin+crypto+cryptocurrency+today&hl=en-IN&gl=IN&ceid=IN:en',
   commodities: 'https://news.google.com/rss/search?q=gold+price+crude+oil+india+today&hl=en-IN&gl=IN&ceid=IN:en',
-  // ── Story instrument symbols ──
-  RELIANCE:    'https://news.google.com/rss/search?q=Reliance+Industries+RIL+NSE+stock+today&hl=en-IN&gl=IN&ceid=IN:en',
-  TCS:         'https://news.google.com/rss/search?q=TCS+Tata+Consultancy+Services+stock+NSE+today&hl=en-IN&gl=IN&ceid=IN:en',
-  HDFCBANK:    'https://news.google.com/rss/search?q=HDFC+Bank+stock+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
-  INFY:        'https://news.google.com/rss/search?q=Infosys+INFY+stock+NSE+today&hl=en-IN&gl=IN&ceid=IN:en',
-  SBIN:        'https://news.google.com/rss/search?q=SBI+State+Bank+India+stock+NSE+today&hl=en-IN&gl=IN&ceid=IN:en',
-  TATAMOTORS:  'https://news.google.com/rss/search?q=Tata+Motors+stock+EV+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
-  ADANIENT:    'https://news.google.com/rss/search?q=Adani+Enterprises+stock+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
-  ZOMATO:      'https://news.google.com/rss/search?q=Zomato+stock+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
-  BTC:         'https://news.google.com/rss/search?q=Bitcoin+BTC+price+news+today&hl=en-IN&gl=IN&ceid=IN:en',
-  ETH:         'https://news.google.com/rss/search?q=Ethereum+ETH+price+news+today&hl=en-IN&gl=IN&ceid=IN:en',
-  SOL:         'https://news.google.com/rss/search?q=Solana+SOL+crypto+price+today&hl=en-IN&gl=IN&ceid=IN:en',
-  GOLD:        'https://news.google.com/rss/search?q=gold+price+MCX+India+today&hl=en-IN&gl=IN&ceid=IN:en',
-  CRUDE:       'https://news.google.com/rss/search?q=crude+oil+WTI+price+today&hl=en-IN&gl=IN&ceid=IN:en',
-  SILVER:      'https://news.google.com/rss/search?q=silver+price+MCX+India+today&hl=en-IN&gl=IN&ceid=IN:en',
+  RELIANCE: 'https://news.google.com/rss/search?q=Reliance+Industries+RIL+NSE+stock+today&hl=en-IN&gl=IN&ceid=IN:en',
+  TCS:      'https://news.google.com/rss/search?q=TCS+Tata+Consultancy+Services+stock+NSE+today&hl=en-IN&gl=IN&ceid=IN:en',
+  HDFCBANK: 'https://news.google.com/rss/search?q=HDFC+Bank+stock+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
+  INFY:     'https://news.google.com/rss/search?q=Infosys+INFY+stock+NSE+today&hl=en-IN&gl=IN&ceid=IN:en',
+  SBIN:     'https://news.google.com/rss/search?q=SBI+State+Bank+India+stock+NSE+today&hl=en-IN&gl=IN&ceid=IN:en',
+  TATAMOTORS: 'https://news.google.com/rss/search?q=Tata+Motors+stock+EV+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
+  ADANIENT:   'https://news.google.com/rss/search?q=Adani+Enterprises+stock+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
+  ZOMATO:     'https://news.google.com/rss/search?q=Zomato+stock+NSE+India+today&hl=en-IN&gl=IN&ceid=IN:en',
+  BTC:  'https://news.google.com/rss/search?q=Bitcoin+BTC+price+news+today&hl=en-IN&gl=IN&ceid=IN:en',
+  ETH:  'https://news.google.com/rss/search?q=Ethereum+ETH+price+news+today&hl=en-IN&gl=IN&ceid=IN:en',
+  SOL:  'https://news.google.com/rss/search?q=Solana+SOL+crypto+price+today&hl=en-IN&gl=IN&ceid=IN:en',
+  GOLD:  'https://news.google.com/rss/search?q=gold+price+MCX+India+today&hl=en-IN&gl=IN&ceid=IN:en',
+  CRUDE: 'https://news.google.com/rss/search?q=crude+oil+WTI+price+today&hl=en-IN&gl=IN&ceid=IN:en',
+  SILVER:'https://news.google.com/rss/search?q=silver+price+MCX+India+today&hl=en-IN&gl=IN&ceid=IN:en',
 };
 
-// Fetch a URL server-side with gzip support and redirect following
 function fetchUrl(url, timeoutMs) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
-    const opts = {
+    const req = https.get({
       hostname: parsed.hostname,
-      path:     parsed.pathname + parsed.search,
-      port:     443,
+      path: parsed.pathname + parsed.search,
+      port: 443,
       headers: {
         'User-Agent':      'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
         'Accept':          'application/rss+xml, application/xml, text/xml, */*',
@@ -45,8 +41,7 @@ function fetchUrl(url, timeoutMs) {
         'Cache-Control':   'no-cache',
       },
       timeout: timeoutMs || 8000,
-    };
-    const req = https.get(opts, (res) => {
+    }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return fetchUrl(res.headers.location, timeoutMs).then(resolve).catch(reject);
       }
@@ -75,7 +70,6 @@ function fetchUrl(url, timeoutMs) {
   });
 }
 
-// Parse RSS XML → array of items (no external libraries)
 function parseRSS(xml, count) {
   const items = [];
   const itemRx = /<item>([\s\S]*?)<\/item>/g;
@@ -89,7 +83,6 @@ function parseRSS(xml, count) {
     const title   = get('title');
     const pubDate = get('pubDate');
     const source  = get('source');
-    // Google News wraps actual link inside <link/> or after <guid>
     let link = get('link');
     if (!link) {
       const gl = block.match(/<link\s*\/>\s*(https?:[^\s<]+)/i);
@@ -119,26 +112,21 @@ function timeAgo(dateStr) {
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
-  // Cache 30 min on CDN, serve stale up to 5 min while revalidating
   res.setHeader('Cache-Control', 's-maxage=1800, stale-while-revalidate=300');
 
   const cat   = (req.query.cat || 'markets').replace(/[^a-zA-Z0-9_]/g, '');
   const count = Math.min(parseInt(req.query.count) || 16, 16);
-
   const rssUrl = RSS_URLS[cat] || RSS_URLS.markets;
 
   try {
     const { status, body } = await fetchUrl(rssUrl, 8000);
     if (status === 200 && body.includes('<item>')) {
-      const items = parseRSS(body, count).map(item => ({
-        ...item,
-        ago: timeAgo(item.date),
-      }));
+      const items = parseRSS(body, count).map(item => ({ ...item, ago: timeAgo(item.date) }));
       if (items.length) {
         return res.status(200).json({ items, cat, source: 'rss', ts: new Date().toISOString() });
       }
     }
-    // Google News returned non-200 or no items — try Economic Times RSS as fallback
+
     const etUrls = {
       markets:     'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms',
       stocks:      'https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms',
@@ -149,15 +137,12 @@ module.exports = async function handler(req, res) {
     const etUrl = etUrls[cat] || etUrls.markets;
     const { status: s2, body: b2 } = await fetchUrl(etUrl, 6000);
     if (s2 === 200 && b2.includes('<item>')) {
-      const items = parseRSS(b2, count).map(item => ({
-        ...item,
-        source: item.source || 'Economic Times',
-        ago: timeAgo(item.date),
-      }));
+      const items = parseRSS(b2, count).map(item => ({ ...item, source: item.source || 'Economic Times', ago: timeAgo(item.date) }));
       if (items.length) {
         return res.status(200).json({ items, cat, source: 'et', ts: new Date().toISOString() });
       }
     }
+
     return res.status(502).json({ error: 'No news items found', cat });
   } catch(e) {
     return res.status(500).json({ error: e.message, cat });
