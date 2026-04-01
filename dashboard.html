@@ -12898,67 +12898,9 @@ function _vsFmt(v) {
   return String(Math.round(v));
 }
 
-// ── Fetch volume data for one NSE symbol via YF v8 chart ───────
-// Returns { sym, name, price, chgPct, todayVol, avgVol20, ratio } or null
-async function _vsFetchOne(sym, yfSym) {
-  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfSym
-            + '?interval=1d&range=25d';
-  const PROXIES = [
-    u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
-    u => 'https://corsproxy.io/?' + encodeURIComponent(u),
-    u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
-  ];
-
-  let raw = null;
-  // Try direct first (sometimes works)
-  for (const base of ['query1','query2']) {
-    try {
-      const r = await fetch(url.replace('query1', base), { signal: AbortSignal.timeout(6000) });
-      if (r.ok) { raw = await r.text(); break; }
-    } catch(e) {}
-  }
-  // Proxy fallback
-  if (!raw) {
-    for (const pfn of PROXIES) {
-      try {
-        const r = await fetch(pfn(url), { signal: AbortSignal.timeout(9000) });
-        if (!r.ok) continue;
-        const t = await r.text();
-        // allorigins wraps in {contents:...}
-        try { const j = JSON.parse(t); raw = j.contents || t; } catch(e) { raw = t; }
-        if (raw && raw.includes('regularMarketPrice')) break;
-      } catch(e) {}
-    }
-  }
-  if (!raw) return null;
-
-  try {
-    const json   = JSON.parse(raw);
-    const result = json?.chart?.result?.[0];
-    if (!result) return null;
-    const meta   = result.meta;
-    const vols   = result.indicators?.quote?.[0]?.volume || [];
-    if (!meta?.regularMarketPrice) return null;
-
-    const price   = meta.regularMarketPrice;
-    const prev    = meta.previousClose || meta.chartPreviousClose || price;
-    const chgPct  = prev ? ((price - prev) / prev * 100) : 0;
-
-    // today's volume = last non-null entry in the volume array
-    const todayVol = vols.filter(v => v != null).slice(-1)[0] || meta.regularMarketVolume || 0;
-
-    // 20-day avg = average of the last 20 available daily volumes (excluding today)
-    const hist    = vols.filter(v => v != null).slice(-21, -1); // up to 20 days before today
-    const avgVol20 = hist.length ? Math.round(hist.reduce((a,b) => a+b, 0) / hist.length) : null;
-
-    const ratio   = (avgVol20 && avgVol20 > 0) ? +(todayVol / avgVol20).toFixed(2) : null;
-    const name    = meta.shortName || meta.longName || sym;
-
-    return { sym, name, price, chgPct, todayVol, avgVol20, ratio };
-  } catch(e) { return null; }
-}
-
-// ── Fetch all NSE stocks in parallel batches ───────────────────
+// ── Fetch all NSE stocks volume via YF v7 batch (fast, same proxy chain) ──
+// v7 /quote returns regularMarketVolume + averageDailyVolume10Day in one request.
+// We batch 50 symbols per call — typically 2 calls total for all NSE stocks.
 async function _vsFetchAll() {
   if (_vsFetching) return;
   _vsFetching = true;
@@ -12967,18 +12909,73 @@ async function _vsFetchAll() {
   if (el) el.textContent = 'Fetching…';
 
   const nseEntries = Object.entries(YF_STOCK_MAP).filter(([,v]) => v.endsWith('.NS'));
-  const BATCH = 8; // parallel requests per wave — respect proxy rate limits
+  const yfToSym = yfSym => { const e = nseEntries.find(([,v]) => v === yfSym); return e ? e[0] : null; };
+
+  // Fields: price, change, volume (today), avgVolume10d, avgVolume3m, shortName
+  const FIELDS = 'regularMarketPrice,regularMarketChangePercent,regularMarketPreviousClose,'
+               + 'regularMarketVolume,averageDailyVolume10Day,averageDailyVolume3Month,shortName';
+
+  const CHUNK = 50;
   const results = [];
 
-  for (let i = 0; i < nseEntries.length; i += BATCH) {
-    const wave = nseEntries.slice(i, i + BATCH);
-    const settled = await Promise.allSettled(
-      wave.map(([sym, yfSym]) => _vsFetchOne(sym, yfSym))
-    );
-    settled.forEach(r => { if (r.status === 'fulfilled' && r.value) results.push(r.value); });
-    // Progressive render after each wave so user sees data building up
-    if (results.length) _vsRender(results);
-    await new Promise(r => setTimeout(r, 200)); // small gap between waves
+  for (let i = 0; i < nseEntries.length; i += CHUNK) {
+    const chunk   = nseEntries.slice(i, i + CHUNK);
+    const symsStr = chunk.map(([,v]) => v).join(',');
+    const v7url   = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols='
+                  + encodeURIComponent(symsStr) + '&fields=' + encodeURIComponent(FIELDS);
+
+    let parsed = null;
+
+    // Try direct (query1 + query2)
+    for (const base of ['query1','query2']) {
+      try {
+        const r = await fetch(v7url.replace('query1', base), { signal: AbortSignal.timeout(7000) });
+        if (r.ok) { const j = await r.json(); if (j?.quoteResponse?.result?.length) { parsed = j; break; } }
+      } catch(e) {}
+    }
+
+    // Proxy fallback chain
+    if (!parsed) {
+      const PROXIES = [
+        u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
+        u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+        u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+      ];
+      for (const pfn of PROXIES) {
+        try {
+          const r = await fetch(pfn(v7url), { signal: AbortSignal.timeout(10000) });
+          if (!r.ok) continue;
+          const text = await r.text();
+          let raw = text;
+          try { const j = JSON.parse(text); raw = j.contents || text; } catch(e) {}
+          const j = JSON.parse(raw);
+          if (j?.quoteResponse?.result?.length) { parsed = j; break; }
+        } catch(e) {}
+      }
+    }
+
+    if (parsed) {
+      parsed.quoteResponse.result.forEach(q => {
+        const sym = yfToSym(q.symbol);
+        if (!sym) return;
+        const price    = q.regularMarketPrice;
+        const prev     = q.regularMarketPreviousClose || price;
+        const chgPct   = q.regularMarketChangePercent != null
+                       ? q.regularMarketChangePercent
+                       : prev ? ((price - prev) / prev * 100) : 0;
+        const todayVol = q.regularMarketVolume || 0;
+        // Prefer 10-day avg; fall back to 3-month avg
+        const avgVol20 = q.averageDailyVolume10Day || q.averageDailyVolume3Month || null;
+        const ratio    = (avgVol20 && avgVol20 > 0) ? +(todayVol / avgVol20).toFixed(2) : null;
+        const name     = q.shortName || sym;
+        results.push({ sym, name, price, chgPct, todayVol, avgVol20, ratio });
+      });
+      // Render progressively after each chunk
+      if (results.length) _vsRender(results);
+    }
+
+    // Small pause between chunks to be kind to proxies
+    if (i + CHUNK < nseEntries.length) await new Promise(r => setTimeout(r, 300));
   }
 
   _vsData      = results;
@@ -12987,6 +12984,16 @@ async function _vsFetchAll() {
 
   const ts = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true, timeZone:'Asia/Kolkata' }) + ' IST';
   if (el) el.textContent = 'Updated ' + ts;
+
+  if (!results.length) {
+    const body = document.getElementById('volumeShockersBody');
+    if (body) body.innerHTML = '<div style="text-align:center;padding:60px 20px;">'
+      + '<div style="font-size:32px;margin-bottom:12px;">📡</div>'
+      + '<div style="font-size:14px;font-weight:700;color:var(--text2);">Could not load volume data</div>'
+      + '<div style="font-size:12px;color:var(--text3);margin-top:6px;margin-bottom:16px;">Check your connection and try again.</div>'
+      + '<button onclick="refreshVolumeShockers(true)" style="padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">🔄 Retry</button>'
+      + '</div>';
+  }
 }
 
 // ── Render the table ───────────────────────────────────────────
@@ -13055,22 +13062,19 @@ function _vsRender(data) {
 
 // ── Public entry point — called by tab switch & refresh button ─
 function refreshVolumeShockers(force) {
-  const panel = document.getElementById('volumeShockersPanel');
-  if (!panel || panel.style.display === 'none') return;
-
   // Use cache if recent enough and not forced
   if (!force && _vsData.length && (Date.now() - _vsLastFetch) < VS_CACHE_MS) {
     _vsRender(_vsData);
     return;
   }
 
-  // Show skeleton immediately
+  // Show loading immediately — never a blank screen
   const body = document.getElementById('volumeShockersBody');
-  if (body && !_vsData.length) {
+  if (body) {
     body.innerHTML = '<div style="text-align:center;padding:60px 20px;">'
       + '<div class="loading-spin" style="margin:0 auto 16px;"></div>'
       + '<div style="font-size:13px;font-weight:700;color:var(--text2);">Fetching live volume data…</div>'
-      + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Pulling 25-day chart data for all NSE stocks</div>'
+      + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Loading NSE stocks in batches…</div>'
       + '</div>';
   }
 
@@ -13080,7 +13084,8 @@ function refreshVolumeShockers(force) {
 // ── Auto-refresh every 30 s while the Volume Shockers tab is active ──
 setInterval(() => {
   const panel = document.getElementById('volumeShockersPanel');
-  if (panel && panel.style.display !== 'none' && !document.hidden) {
+  // Check computed style too, not just inline style
+  if (!document.hidden && panel && getComputedStyle(panel).display !== 'none' && panel.style.display !== 'none') {
     refreshVolumeShockers(true);
   }
 }, 30000);
