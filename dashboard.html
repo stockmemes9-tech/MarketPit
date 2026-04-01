@@ -12658,6 +12658,108 @@ let _seenStories = new Set(JSON.parse(localStorage.getItem('mp_seen_stories')||'
 let _storyIdx = 0;
 let _storyTimer = null;
 const STORY_DURATION = 8000; // 8s per slide
+  const STORY_NEWS_TTL = 60 * 60 * 1000; // refresh instrument headlines every hour
+
+async function expandStorySubjectsFromNews() {
+  try {
+    const news = await _fetchNewsItems('markets', 40);
+    if (!Array.isArray(news) || !news.length) return;
+
+    const titles = news.map(n => String(n.title || '').toLowerCase()).filter(Boolean);
+    if (!titles.length) return;
+
+    const existing = new Set(STORY_SUBJECTS.map(s => s.id));
+    const ranked = STORY_NEWS_CANDIDATES
+      .filter(c => !existing.has(c.id))
+      .map(c => {
+        const keys = c.keywords && c.keywords.length ? c.keywords : [c.label.toLowerCase()];
+        const score = titles.reduce((acc, t) => acc + (keys.some(k => t.includes(k)) ? 1 : 0), 0);
+        return { ...c, score };
+      })
+      .filter(c => c.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    if (!ranked.length) return;
+
+    const addCaps = { stock: 3, crypto: 2, commodity: 2 };
+    const addedByType = { stock: 0, crypto: 0, commodity: 0 };
+    let totalAdded = 0;
+    for (const c of ranked) {
+      if (totalAdded >= 6) break;
+      const t = c.type || 'stock';
+      if ((addedByType[t] || 0) >= (addCaps[t] || 2)) continue;
+      STORY_SUBJECTS.push({ id:c.id, label:c.label, emoji:c.emoji, type:c.type, yf:c.yf, cg:c.cg, newsQ:c.newsQ });
+      addedByType[t] = (addedByType[t] || 0) + 1;
+      totalAdded++;
+    }
+  } catch(e) {}
+}
+
+function getStoryKeywords(subj) {
+  const base = [String(subj.label || '').toLowerCase(), String(subj.id || '').toLowerCase()];
+  const labelParts = String(subj.label || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return [...new Set([...base, ...labelParts].filter(Boolean))];
+}
+
+async function fetchStoryNewsForSubject(subj) {
+  let items = null;
+
+  // Strategy 1: /api/news — only when on localhost
+  if (window.location.hostname==='localhost' || window.location.hostname==='127.0.0.1') {
+    try {
+      const r = await fetch('http://localhost:3000/api/news?cat=' + subj.id + '&count=4', { signal: AbortSignal.timeout(5000) });
+      if (r.ok) {
+        const j = await r.json();
+        if (j.items && j.items.length) {
+          items = j.items.slice(0, 4).map(i => ({
+            title: i.title,
+            link:  i.link,
+            ago:   i.ago,
+            src:   i.source,
+          })).filter(n => n.title && n.title.length > 10);
+        }
+      }
+    } catch(e) {}
+  }
+
+  // Strategy 2: RSS query focused on the specific instrument
+  if (!items || !items.length) {
+    const q = subj.newsQ || (subj.label + ' market news today');
+    const feedUrl = 'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-IN&gl=IN&ceid=IN:en';
+    const raw = await _tryFeed(feedUrl, 8);
+    if (raw && raw.length) {
+      const keys = getStoryKeywords(subj);
+      const filtered = raw.filter(i => {
+        const t = String(i.title || '').toLowerCase();
+        return keys.some(k => t.includes(k));
+      });
+      const picked = (filtered.length ? filtered : raw).slice(0, 4);
+      items = picked.map(i => ({ title: i.title, link: i.link, ago: i.ago, src: i.source }))
+                   .filter(n => n.title && n.title.length > 10);
+    }
+  }
+
+  return (items || []).slice(0, 2);
+}
+
+async function refreshStoryNewsForSubject(subj, force=false) {
+  if (!subj || !subj.id) return;
+  if (!_stories[subj.id]) _stories[subj.id] = {};
+  const stale = !_stories[subj.id].newsTs || (Date.now() - _stories[subj.id].newsTs > STORY_NEWS_TTL);
+  if (!force && !stale && Array.isArray(_stories[subj.id].news) && _stories[subj.id].news.length) return;
+
+  try {
+    const items = await fetchStoryNewsForSubject(subj);
+    if (!items.length) return;
+    _stories[subj.id].news = items.slice(0, 2);
+    _stories[subj.id].newsTs = Date.now();
+
+    const modal = document.getElementById('storyModal');
+    if (modal && modal.classList.contains('open') && STORY_SUBJECTS[_storyIdx]?.id === subj.id) {
+      renderStorySlide();
+    }
+  } catch(e) {}
+}
 async function expandStorySubjectsFromNews() {
   try {
     const news = await _fetchNewsItems('markets', 40);
@@ -12728,63 +12830,8 @@ async function buildStories() {
   // Re-render bubbles with price data, then fetch top 2 news per instrument in background
   renderStoryBubbles();
 
-  // ── Fetch news for ALL instruments in parallel via /api/news (non-blocking) ──
-  Promise.allSettled(STORY_SUBJECTS.map(async subj => {
-    try {
-      let items = null;
-
-      // Strategy 1: /api/news — only when on localhost
-      if (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1') {
-        try {
-          const r = await fetch('http://localhost:3000/api/news?cat=' + subj.id + '&count=2', { signal: AbortSignal.timeout(5000) });
-          if (r.ok) {
-            const j = await r.json();
-            if (j.items && j.items.length) {
-              items = j.items.slice(0, 2).map(i => ({
-                title: i.title,
-                link:  i.link,
-                ago:   i.ago,
-                src:   i.source,
-              })).filter(n => n.title.length > 10);
-            }
-          }
-        } catch(e) {}
-      }
-
-      // Strategy 2: Multi-source RSS fetch (ET → MoneyControl → Google News)
-      if (!items || !items.length) {
-        const q = subj.newsQ || (subj.label + ' stock market India today');
-        const feeds = [
-          'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms',
-          'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-IN&gl=IN&ceid=IN:en',
-        ];
-        for (const feedUrl of feeds) {
-          const raw = await _tryFeed(feedUrl, 4);
-          if (raw && raw.length) {
-            // Filter to items mentioning the subject
-            const kw = subj.label.toLowerCase();
-            const filtered = raw.filter(i => i.title.toLowerCase().includes(kw));
-            const picked = (filtered.length >= 2 ? filtered : raw).slice(0, 2);
-            items = picked.map(i => ({ title: i.title, link: i.link, ago: i.ago, src: i.source }))
-                         .filter(n => n.title.length > 10);
-            if (items.length) break;
-          }
-        }
-      }
-
-      if (items && items.length) {
-        if (!_stories[subj.id]) _stories[subj.id] = {};
-        _stories[subj.id].news = items;
-        // If story modal is open on this subject, re-render the slide live
-        const modal = document.getElementById('storyModal');
-        if (modal && modal.classList.contains('open') && STORY_SUBJECTS[_storyIdx]?.id === subj.id) {
-          renderStorySlide();
-        }
-      }
-    } catch(e) {}
-  }));
-}
-
+  // ── Fetch live top-2 headlines for each instrument (non-blocking) ──
+  Promise.allSettled(STORY_SUBJECTS.map(subj => refreshStoryNewsForSubject(subj, true)));
 function renderStoryBubbles() {
   const track = document.getElementById('storiesTrack');
   if (!track) return;
@@ -12809,6 +12856,7 @@ function openStory(idx) {
   const modal = document.getElementById('storyModal');
   modal.classList.add('open');
   renderStorySlide();
+  refreshStoryNewsForSubject(STORY_SUBJECTS[_storyIdx]);
   startStoryTimer();
   document.addEventListener('keydown', _storyKeyHandler);
 }
@@ -12897,7 +12945,7 @@ function renderStorySlide() {
   }
 
   // News headlines
-  const news = data.news || [];
+  const news = (data.news || []).slice(0, 2);
   if (news.length) {
     html += '<div style="display:flex;flex-direction:column;gap:8px;">';
     news.forEach(n => {
