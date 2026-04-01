@@ -1267,8 +1267,12 @@ header {
 
 
     <!-- ── STORIES BAR ── -->
-    <div id="storiesBar" style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0;scrollbar-width:none;">
-      <div id="storiesTrack" style="display:flex;gap:10px;align-items:center;min-width:max-content;"></div>
+   <div id="storiesBar" style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0;scrollbar-width:none;min-height:84px;">
+      <div id="storiesTrack" style="display:flex;gap:10px;align-items:center;min-width:max-content;">
+        <div class="story-bubble"><div class="story-ring"><div class="story-ring-inner">📈</div></div><div class="story-label">Nifty 50</div></div>
+        <div class="story-bubble"><div class="story-ring"><div class="story-ring-inner">₿</div></div><div class="story-label">Bitcoin</div></div>
+        <div class="story-bubble"><div class="story-ring"><div class="story-ring-inner">🥇</div></div><div class="story-label">Gold</div></div>
+      </div>
     </div>
     <script>
     (function tryStories(n){
