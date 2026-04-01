@@ -1412,6 +1412,7 @@ header {
         <button id="scr_tab_screen" onclick="switchScreenerTab('screen')" style="padding:5px 16px;border-radius:6px;border:none;font-weight:700;font-size:12px;cursor:pointer;background:var(--accent);color:#fff;font-family:'DM Sans',sans-serif;">🔍 Screener</button>
         <button id="scr_tab_patterns" onclick="switchScreenerTab('patterns')" style="padding:5px 16px;border-radius:6px;border:none;font-weight:700;font-size:12px;cursor:pointer;background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;">📐 Chart Patterns</button>
         <button id="scr_tab_livepatterns" onclick="switchScreenerTab('livepatterns')" style="padding:5px 16px;border-radius:6px;border:none;font-weight:700;font-size:12px;cursor:pointer;background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;">📈 Live Patterns</button>
+        <button id="scr_tab_volumeshockers" onclick="switchScreenerTab('volumeshockers')" style="padding:5px 16px;border-radius:6px;border:none;font-weight:700;font-size:12px;cursor:pointer;background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;">⚡ Volume Shockers</button>
       </div>
       <div id="screenerAssetBtns" style="display:flex;gap:6px;">
         <button onclick="setAssetType('stocks',this)" id="at_stocks" style="padding:7px 16px;border-radius:8px;border:1px solid var(--accent);background:rgba(0,112,243,0.1);color:var(--accent);font-weight:700;font-size:12px;cursor:pointer;">🏦 Stocks</button>
@@ -1540,6 +1541,25 @@ header {
       </div>
       <!-- Table -->
       <div class="feed-scroll" id="livePatternsTable" style="padding:0;"></div>
+    </div>
+
+    <!-- VOLUME SHOCKERS PANEL -->
+    <div id="volumeShockersPanel" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+      <!-- Header bar -->
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;flex-wrap:wrap;flex-shrink:0;">
+        <div style="font-size:12px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:1px;">SORT BY</div>
+        <div style="display:flex;gap:6px;">
+          <button id="vs_ratio"  onclick="setVSSort('ratio',this)"  style="padding:5px 14px;border-radius:6px;border:1px solid var(--accent);background:rgba(0,112,243,0.1);color:var(--accent);font-weight:700;font-size:11px;cursor:pointer;">Vol Ratio</button>
+          <button id="vs_today"  onclick="setVSSort('today',this)"  style="padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-weight:700;font-size:11px;cursor:pointer;">Today Vol</button>
+          <button id="vs_avg"    onclick="setVSSort('avg',this)"    style="padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-weight:700;font-size:11px;cursor:pointer;">Avg Vol</button>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
+          <span id="vsLastUpdated" style="font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;"></span>
+          <button onclick="refreshVolumeShockers(true)" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-size:11px;font-weight:600;cursor:pointer;">↺ Refresh</button>
+        </div>
+      </div>
+      <!-- Table body -->
+      <div class="feed-scroll" id="volumeShockersBody" style="padding:16px;"></div>
     </div>
     </div>
 
@@ -2280,17 +2300,14 @@ let _apiWaking  = false;
 let _apiChecked = false;
 
 async function checkApiAndWake() {
+  // On GitHub Pages /api doesn't exist — skip to avoid blocking browser connection pool
+  const _onLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (!_onLocalhost) { _apiChecked = true; _apiWaking = false; return false; }
   if (_apiWaking) return;
   _apiWaking = true;
   try {
-    const r = await fetch(API_BASE + '/status', { signal: AbortSignal.timeout(8000) });
+    const r = await fetch(API_BASE + '/status', { signal: AbortSignal.timeout(5000) });
     if (r.ok) { _apiOnline = true; _apiChecked = true; _apiWaking = false; return true; }
-  } catch(e) {}
-  // Try to wake it — ping once more after 5s
-  await new Promise(res => setTimeout(res, 5000));
-  try {
-    const r = await fetch(API_BASE + '/status', { signal: AbortSignal.timeout(10000) });
-    if (r.ok) { _apiOnline = true; }
   } catch(e) {}
   _apiChecked = true; _apiWaking = false;
   return _apiOnline;
@@ -6016,26 +6033,29 @@ function _switchTabSilent(btn, page) {
 
 function _switchScreenerTabSilent(tab) {
   const patPanel  = document.getElementById('patternsPanel');
+  const lpPanel   = document.getElementById('livePatternsPanel');
+  const vsPanel   = document.getElementById('volumeShockersPanel');
   const resEl     = document.getElementById('screenerResults');
   const filtersBar= document.querySelector('#page-screener > div:nth-child(2)');
   const assetBtns = document.getElementById('screenerAssetBtns');
 
-  document.getElementById('scr_tab_screen').style.background   = tab==='screen'  ? 'var(--accent)' : 'transparent';
-  document.getElementById('scr_tab_screen').style.color        = tab==='screen'  ? '#fff' : 'var(--text3)';
-  document.getElementById('scr_tab_patterns').style.background = tab==='patterns'? 'var(--accent)' : 'transparent';
-  document.getElementById('scr_tab_patterns').style.color      = tab==='patterns'? '#fff' : 'var(--text3)';
+  ['screen','patterns','livepatterns','volumeshockers'].forEach(t => {
+    const btn = document.getElementById('scr_tab_' + t);
+    if (!btn) return;
+    btn.style.background = (t === tab) ? 'var(--accent)' : 'transparent';
+    btn.style.color      = (t === tab) ? '#fff' : 'var(--text3)';
+  });
 
-  if (tab === 'screen') {
-    if (resEl)      resEl.style.display      = 'block';
-    if (filtersBar) filtersBar.style.display = 'flex';
-    if (assetBtns)  assetBtns.style.display  = 'flex';
-    if (patPanel)   patPanel.style.display   = 'none';
-  } else {
-    if (resEl)      resEl.style.display      = 'none';
-    if (filtersBar) filtersBar.style.display = 'none';
-    if (assetBtns)  assetBtns.style.display  = 'none';
-    if (patPanel)   { patPanel.style.display = 'flex'; renderPatterns(); }
-  }
+  if (resEl)      resEl.style.display      = tab==='screen' ? 'block' : 'none';
+  if (filtersBar) filtersBar.style.display = tab==='screen' ? 'flex'  : 'none';
+  if (assetBtns)  assetBtns.style.display  = tab==='screen' ? 'flex'  : 'none';
+  if (patPanel)   patPanel.style.display   = tab==='patterns'       ? 'flex' : 'none';
+  if (lpPanel)    lpPanel.style.display    = tab==='livepatterns'   ? 'flex' : 'none';
+  if (vsPanel)    vsPanel.style.display    = tab==='volumeshockers' ? 'flex' : 'none';
+
+  if (tab === 'patterns')       renderPatterns();
+  if (tab === 'livepatterns')   renderLivePatterns();
+  if (tab === 'volumeshockers') refreshVolumeShockers(false);
 }
 
 function switchTabMobile(btn, page) {
@@ -6458,11 +6478,12 @@ function switchScreenerTab(tab) {
   navPush({ type: 'screener_tab', tab });
   const patPanel  = document.getElementById('patternsPanel');
   const lpPanel   = document.getElementById('livePatternsPanel');
+  const vsPanel   = document.getElementById('volumeShockersPanel');
   const filtersBar= document.querySelector('#page-screener > div:nth-child(2)');
   const assetBtns = document.getElementById('screenerAssetBtns');
 
-  // Style all 3 tab buttons
-  ['screen','patterns','livepatterns'].forEach(t => {
+  // Style all 4 tab buttons
+  ['screen','patterns','livepatterns','volumeshockers'].forEach(t => {
     const btn = document.getElementById('scr_tab_' + t);
     if (!btn) return;
     btn.style.background = (t === tab) ? 'var(--accent)' : 'transparent';
@@ -6474,9 +6495,11 @@ function switchScreenerTab(tab) {
   if (assetBtns)  assetBtns.style.display  = tab==='screen' ? 'flex' : 'none';
   if (patPanel)   patPanel.style.display   = tab==='patterns' ? 'flex' : 'none';
   if (lpPanel)    lpPanel.style.display    = tab==='livepatterns' ? 'flex' : 'none';
+  if (vsPanel)    vsPanel.style.display    = tab==='volumeshockers' ? 'flex' : 'none';
 
   if (tab === 'patterns') renderPatterns();
   if (tab === 'livepatterns') renderLivePatterns();
+  if (tab === 'volumeshockers') refreshVolumeShockers(false);
 }
 
 
@@ -10345,27 +10368,23 @@ document.addEventListener('visibilitychange', () => {
     fetchCryptoLive();
   }
 });
-// ── RAILWAY KEEP-ALIVE: ping every 8 minutes to prevent Railway from sleeping ──
-// Railway free tier sleeps after ~30 min of no traffic — this keeps it awake
+// ── RAILWAY KEEP-ALIVE: only on localhost — GitHub Pages has no Railway backend ──
+const _isStaticHost = !(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 async function pingRailway() {
-  try {
-    await fetch(`${API_BASE}/status`, { signal: AbortSignal.timeout(5000) });
-  } catch(e) {}
+  if (_isStaticHost) return; // skip on GitHub Pages — avoids saturating browser connection pool
+  try { await fetch(`${API_BASE}/status`, { signal: AbortSignal.timeout(5000) }); } catch(e) {}
 }
-setInterval(pingRailway, 8 * 60 * 1000); // every 8 minutes
+if (!_isStaticHost) setInterval(pingRailway, 8 * 60 * 1000);
 
-// ── WAKE-UP RETRY: if Railway is offline at startup, retry every 15s for 3 mins ──
+// ── WAKE-UP RETRY: disabled on GitHub Pages ──
+// On static hosting /api doesn't exist; 13 × 8s timeout calls block all YF price fetches
 let _wakeRetries = 0;
-const _wakeTimer = setInterval(async () => {
+const _wakeTimer = _isStaticHost ? null : setInterval(async () => {
   if (_apiOnline || _wakeRetries > 12) { clearInterval(_wakeTimer); return; }
   _wakeRetries++;
   try {
-    const r = await fetch(`${API_BASE}/status`, { signal: AbortSignal.timeout(8000) });
-    if (r.ok) {
-      _apiOnline = true;
-      clearInterval(_wakeTimer);
-      fetchLiveData(); // fetch full dataset now that Railway is up
-    }
+    const r = await fetch(`${API_BASE}/status`, { signal: AbortSignal.timeout(5000) });
+    if (r.ok) { _apiOnline = true; clearInterval(_wakeTimer); fetchLiveData(); }
   } catch(e) {}
 }, 15000);
 
@@ -10394,18 +10413,53 @@ document.addEventListener('visibilitychange', () => {
 // ── NEWS (Vercel /api/news primary → RSS proxies fallback) ──
 let _newsLoaded = {};
 
-const NEWS_URLS = {
-  markets:     'https://news.google.com/rss/search?q=indian+stock+market+nifty+sensex&hl=en-IN&gl=IN&ceid=IN:en',
-  stocks:      'https://news.google.com/rss/search?q=NSE+BSE+india+stocks+today&hl=en-IN&gl=IN&ceid=IN:en',
-  economy:     'https://news.google.com/rss/search?q=india+economy+RBI+inflation+2026&hl=en-IN&gl=IN&ceid=IN:en',
-  crypto:      'https://news.google.com/rss/search?q=bitcoin+crypto+cryptocurrency+today&hl=en-IN&gl=IN&ceid=IN:en',
-  commodities: 'https://news.google.com/rss/search?q=gold+price+crude+oil+india+today&hl=en-IN&gl=IN&ceid=IN:en',
+// ══════════════════════════════════════════════════════════════
+// MARKET NEWS ENGINE
+// Source priority (all free, no API key, no backend):
+//   1. Economic Times RSS  — most reliable Indian financial RSS
+//   2. Mint RSS            — second major Indian financial daily
+//   3. MoneyControl RSS    — broad market coverage
+//   4. Google News RSS     — broad fallback via proxy
+//   5. RSS2JSON API        — converts any RSS without CORS
+// Each source tried via allorigins → corsproxy → codetabs proxy chain.
+// Auto-refreshes every 15 min while tab is open.
+// ══════════════════════════════════════════════════════════════
+
+// ── RSS source lists per category ────────────────────────────
+// Multiple feeds per category — tried in order until one works
+const NEWS_SOURCES = {
+  markets: [
+    'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms',
+    'https://www.livemint.com/rss/markets',
+    'https://www.moneycontrol.com/rss/MCtopnews.xml',
+    'https://news.google.com/rss/search?q=indian+stock+market+nifty+sensex&hl=en-IN&gl=IN&ceid=IN:en',
+  ],
+  stocks: [
+    'https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms',
+    'https://www.moneycontrol.com/rss/marketreports.xml',
+    'https://news.google.com/rss/search?q=NSE+BSE+india+stocks+today&hl=en-IN&gl=IN&ceid=IN:en',
+  ],
+  economy: [
+    'https://economictimes.indiatimes.com/economy/rssfeeds/1373380680.cms',
+    'https://www.livemint.com/rss/economy',
+    'https://news.google.com/rss/search?q=india+economy+RBI+GDP+inflation+2026&hl=en-IN&gl=IN&ceid=IN:en',
+  ],
+  crypto: [
+    'https://economictimes.indiatimes.com/tech/technology/rssfeeds/13357270.cms',
+    'https://www.coindesk.com/arc/outboundfeeds/rss/',
+    'https://news.google.com/rss/search?q=bitcoin+ethereum+crypto+india+today&hl=en-IN&gl=IN&ceid=IN:en',
+  ],
+  commodities: [
+    'https://economictimes.indiatimes.com/markets/commodities/rssfeeds/1368154900.cms',
+    'https://www.livemint.com/rss/commodities',
+    'https://news.google.com/rss/search?q=gold+price+crude+oil+india+mcx+today&hl=en-IN&gl=IN&ceid=IN:en',
+  ],
 };
 
-// Cache TTL: 15 minutes — live feel without hammering proxies
+// Cache TTL: 15 minutes
 const NEWS_CACHE_TTL = 15 * 60 * 1000;
 
-// ── Skeleton loader — shows instantly, no blank screen ──
+// ── Skeleton loader ───────────────────────────────────────────
 function _renderNewsSkeleton(container, count) {
   count = count || 8;
   const shimmer = `
@@ -10439,27 +10493,44 @@ function timeAgo(dateStr) {
   return Math.floor(h/24) + 'd ago';
 }
 
-// Parse raw RSS XML text → array of news items
+// ── Parse raw RSS XML ─────────────────────────────────────────
 function _parseRSSText(text, limit) {
   try {
     const xml = new DOMParser().parseFromString(text, 'text/xml');
-    return Array.from(xml.querySelectorAll('item')).slice(0, limit || 16).map(el => ({
-      title:  (el.querySelector('title')?.textContent || '').trim(),
-      link:   (el.querySelector('link')?.textContent || '#').trim(),
-      date:   (el.querySelector('pubDate')?.textContent || '').trim(),
-      source: (el.querySelector('source')?.textContent || 'Google News').trim(),
-      ago:    timeAgo(el.querySelector('pubDate')?.textContent || ''),
-    })).filter(i => i.title.length > 8);
+    const items = Array.from(xml.querySelectorAll('item')).slice(0, limit || 16).map(el => {
+      const title  = (el.querySelector('title')?.textContent || '').trim().replace(/^<!\[CDATA\[|\]\]>$/g,'').trim();
+      const link   = (el.querySelector('link')?.textContent || el.querySelector('guid')?.textContent || '#').trim();
+      const date   = (el.querySelector('pubDate')?.textContent || '').trim();
+      const source = (el.querySelector('source')?.textContent || '').trim();
+      return { title, link, date, source: source || '', ago: timeAgo(date) };
+    }).filter(i => i.title.length > 8);
+    return items;
   } catch(e) { return []; }
 }
 
-// Fetch RSS via a chain of CORS proxies → returns parsed items or []
-async function _fetchRSSItems(rssUrl, limit) {
-  // 1. rss2json.com — most reliable free public RSS-to-JSON API
+// ── Detect source name from feed URL ─────────────────────────
+function _srcName(feedUrl) {
+  if (feedUrl.includes('economictimes')) return 'Economic Times';
+  if (feedUrl.includes('livemint'))      return 'Mint';
+  if (feedUrl.includes('moneycontrol'))  return 'MoneyControl';
+  if (feedUrl.includes('coindesk'))      return 'CoinDesk';
+  return 'Google News';
+}
+
+// ── Try one RSS feed via proxy chain ─────────────────────────
+async function _tryFeed(feedUrl, limit) {
+  const PROXIES = [
+    u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
+    u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+    u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+  ];
+  const srcName = _srcName(feedUrl);
+
+  // 1. Try RSS2JSON (no CORS, converts RSS to JSON cleanly)
   try {
     const r = await fetch(
-      'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(rssUrl) + '&count=' + (limit||16),
-      { signal: AbortSignal.timeout(8000) }
+      'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feedUrl) + '&count=' + (limit||16),
+      { signal: AbortSignal.timeout(7000) }
     );
     if (r.ok) {
       const j = await r.json();
@@ -10468,51 +10539,58 @@ async function _fetchRSSItems(rssUrl, limit) {
           title:  (i.title || '').trim(),
           link:   i.link || '#',
           date:   i.pubDate || '',
-          source: (j.feed?.title || i.author || 'Google News').replace(/ - .*$/, '').slice(0, 40),
+          source: j.feed?.title?.replace(/ [-|].*$/,'').trim() || srcName,
           ago:    timeAgo(i.pubDate || ''),
         })).filter(i => i.title.length > 8);
       }
     }
   } catch(e) {}
 
-  // 2. allorigins.win → raw XML
-  try {
-    const r = await fetch(
-      'https://api.allorigins.win/get?url=' + encodeURIComponent(rssUrl),
-      { signal: AbortSignal.timeout(9000) }
-    );
-    if (r.ok) {
-      const j = await r.json();
-      const items = _parseRSSText(j.contents || '', limit);
+  // 2. Try raw RSS via proxy chain
+  for (const pfn of PROXIES) {
+    try {
+      const r = await fetch(pfn(feedUrl), { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) continue;
+      const text = await r.text();
+      // allorigins wraps in JSON
+      let raw = text;
+      try { const j = JSON.parse(text); if (j.contents) raw = j.contents; } catch(e) {}
+      if (!raw.includes('<item>')) continue;
+      const items = _parseRSSText(raw, limit).map(i => ({
+        ...i, source: i.source || srcName
+      }));
       if (items.length) return items;
-    }
-  } catch(e) {}
+    } catch(e) {}
+  }
+  return null;
+}
 
-  // 3. corsproxy.io → raw XML
-  try {
-    const r = await fetch(
-      'https://corsproxy.io/?' + encodeURIComponent(rssUrl),
-      { signal: AbortSignal.timeout(9000) }
-    );
-    if (r.ok) {
-      const items = _parseRSSText(await r.text(), limit);
-      if (items.length) return items;
-    }
-  } catch(e) {}
+// ── Main fetch: try all sources for a category in parallel ───
+// Returns from whichever source wins first, shows partial results fast
+async function _fetchNewsItems(cat, limit) {
+  const feeds = NEWS_SOURCES[cat] || NEWS_SOURCES.markets;
 
-  // 4. codetabs proxy → raw XML
-  try {
-    const r = await fetch(
-      'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(rssUrl),
-      { signal: AbortSignal.timeout(9000) }
-    );
-    if (r.ok) {
-      const items = _parseRSSText(await r.text(), limit);
-      if (items.length) return items;
-    }
-  } catch(e) {}
+  // Race all feeds in parallel — return first winner
+  return new Promise(resolve => {
+    let settled = 0;
+    let won = false;
+    const total = feeds.length;
 
-  return [];
+    feeds.forEach(feedUrl => {
+      _tryFeed(feedUrl, limit).then(items => {
+        settled++;
+        if (!won && items && items.length >= 4) {
+          won = true;
+          resolve(items);
+        }
+        // If all feeds exhausted without a winner, resolve with whatever we have
+        if (settled === total && !won) resolve([]);
+      }).catch(() => {
+        settled++;
+        if (settled === total && !won) resolve([]);
+      });
+    });
+  });
 }
 
 async function loadNews(cat, btn) {
@@ -10523,33 +10601,15 @@ async function loadNews(cat, btn) {
   const container = document.getElementById('newsContainer');
   if(!container) return;
 
-  // Cache: 1 hour — instant render
+  // Serve from cache if fresh
   if(_newsLoaded[cat] && Date.now()-_newsLoaded[cat].ts < NEWS_CACHE_TTL){ renderNews(_newsLoaded[cat].items); return; }
 
-  // ── Show skeleton IMMEDIATELY — no blank screen ──
+  // Show skeleton immediately — never a blank screen
   _renderNewsSkeleton(container, 8);
 
-  const rssUrl = NEWS_URLS[cat] || NEWS_URLS.markets;
+  const items = await _fetchNewsItems(cat, 16);
 
-  // Strategy 1: Own Vercel /api/news — only when running on localhost (not GitHub Pages)
-  const _isLocalhost = (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1');
-  if (_isLocalhost) {
-    try {
-      const _nr = await fetch('http://localhost:3000/api/news?cat='+cat, {signal:AbortSignal.timeout(5000)});
-      if (_nr.ok) {
-        const _nj = await _nr.json();
-        if (_nj.items && _nj.items.length) {
-          _newsLoaded[cat] = {ts:Date.now(), items:_nj.items};
-          renderNews(_nj.items);
-          return;
-        }
-      }
-    } catch(e) {}
-  }
-
-  // Strategy 2: RSS proxy fallbacks (client-side) — primary path on GitHub Pages
-  const items = await _fetchRSSItems(rssUrl, 16);
-  if (items.length) {
+  if (items && items.length) {
     _newsLoaded[cat] = { ts: Date.now(), items };
     renderNews(items);
     return;
@@ -10565,7 +10625,6 @@ async function loadNews(cat, btn) {
     +'</div>';
 }
 
-
 function renderNews(items) {
   const container = document.getElementById('newsContainer');
   if (!items || !items.length) {
@@ -10576,13 +10635,13 @@ function renderNews(items) {
   const srcColor = src => {
     if (!src) return 'var(--accent)';
     const s = src.toLowerCase();
-    if (s.includes('economic times')) return '#ff6b35';
+    if (s.includes('economic times') || s.includes('et ')) return '#ff6b35';
     if (s.includes('moneycontrol'))   return '#00aaff';
+    if (s.includes('mint'))           return '#00cc88';
     if (s.includes('reuters'))        return '#ff9900';
     if (s.includes('bloomberg'))      return '#6666ff';
-    if (s.includes('mint'))           return '#00cc88';
     if (s.includes('ndtv'))           return '#ff3355';
-    if (s.includes('coin'))           return 'var(--gold)';
+    if (s.includes('coindesk') || s.includes('coin')) return 'var(--gold)';
     if (s.includes('business'))       return '#44aaff';
     return 'var(--accent)';
   };
@@ -10590,12 +10649,12 @@ function renderNews(items) {
   let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:4px 0 16px;">';
   items.forEach((item, i) => {
     const col = srcColor(item.source);
-    const ago = timeAgo(item.date);
+    const ago = item.ago || timeAgo(item.date);
     const big = i === 0;
     const url = item.link.startsWith('http') ? item.link.replace(/'/g,'') : '#';
     html += '<div style="' + (big ? 'grid-column:1/-1;' : '') + 'background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;transition:border-color 0.2s,transform 0.15s;" onmouseover="this.style.borderColor=\'var(--border2)\';this.style.transform=\'translateY(-1px)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.transform=\'translateY(0)\'" onclick="window.open(\'' + url + '\',\'_blank\')">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">';
-    html += '<span style="font-size:10px;font-weight:700;color:' + col + ';background:' + col + '18;border:1px solid ' + col + '33;border-radius:4px;padding:2px 8px;">' + item.source + '</span>';
+    html += '<span style="font-size:10px;font-weight:700;color:' + col + ';background:' + col + '18;border:1px solid ' + col + '33;border-radius:4px;padding:2px 8px;">' + (item.source || 'News') + '</span>';
     if (ago) html += '<span style="font-family:\'Space Mono\',monospace;font-size:9px;color:var(--text3);">' + ago + '</span>';
     html += '</div>';
     html += '<div style="font-size:' + (big?'15':'13') + 'px;font-weight:700;color:var(--text);line-height:1.45;margin-bottom:6px;">' + item.title + '</div>';
@@ -12621,17 +12680,25 @@ async function buildStories() {
         } catch(e) {}
       }
 
-      // Strategy 2: RSS proxy fallback (client-side)
+      // Strategy 2: Multi-source RSS fetch (ET → MoneyControl → Google News)
       if (!items || !items.length) {
-        const q      = subj.newsQ || (subj.label + ' stock market India today');
-        const rssUrl = 'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-IN&gl=IN&ceid=IN:en';
-        const raw    = await _fetchRSSItems(rssUrl, 3);
-        items = raw.slice(0, 2).map(i => ({
-          title: i.title,
-          link:  i.link,
-          ago:   i.ago,
-          src:   i.source,
-        })).filter(n => n.title.length > 10);
+        const q = subj.newsQ || (subj.label + ' stock market India today');
+        const feeds = [
+          'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms',
+          'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-IN&gl=IN&ceid=IN:en',
+        ];
+        for (const feedUrl of feeds) {
+          const raw = await _tryFeed(feedUrl, 4);
+          if (raw && raw.length) {
+            // Filter to items mentioning the subject
+            const kw = subj.label.toLowerCase();
+            const filtered = raw.filter(i => i.title.toLowerCase().includes(kw));
+            const picked = (filtered.length >= 2 ? filtered : raw).slice(0, 2);
+            items = picked.map(i => ({ title: i.title, link: i.link, ago: i.ago, src: i.source }))
+                         .filter(n => n.title.length > 10);
+            if (items.length) break;
+          }
+        }
       }
 
       if (items && items.length) {
@@ -12793,6 +12860,231 @@ setInterval(fetchCommoditiesLive,5*60*1000);
 // Defer buildStories until after the page is fully interactive — prevents freeze on load
 setTimeout(buildStories, 1500);
 setInterval(buildStories, 60 * 60 * 1000);
+
+// ══════════════════════════════════════════════════════════════════
+// VOLUME SHOCKERS
+// Fetches today's live volume + 20-day average volume for all NSE
+// stocks via Yahoo Finance v8 chart API (proxy chain, no backend).
+// Sorted by volume ratio (today / avg20) descending by default.
+// Auto-refreshes every 30 seconds while the tab is visible.
+// ══════════════════════════════════════════════════════════════════
+
+let _vsSort       = 'ratio';   // 'ratio' | 'today' | 'avg'
+let _vsData       = [];        // cached results
+let _vsFetching   = false;
+let _vsLastFetch  = 0;
+const VS_CACHE_MS = 30000;     // 30 s
+
+// ── Sort button UI helper ──────────────────────────────────────
+function setVSSort(mode, btn) {
+  _vsSort = mode;
+  ['ratio','today','avg'].forEach(m => {
+    const b = document.getElementById('vs_' + m);
+    if (!b) return;
+    const active = m === mode;
+    b.style.borderColor  = active ? 'var(--accent)' : 'var(--border)';
+    b.style.background   = active ? 'rgba(0,112,243,0.1)' : 'transparent';
+    b.style.color        = active ? 'var(--accent)' : 'var(--text3)';
+  });
+  if (_vsData.length) _vsRender(_vsData);
+}
+
+// ── Format volume number → readable string ─────────────────────
+function _vsFmt(v) {
+  if (v == null || isNaN(v)) return '—';
+  if (v >= 1e7) return (v / 1e7).toFixed(2) + ' Cr';
+  if (v >= 1e5) return (v / 1e5).toFixed(2) + ' L';
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + ' K';
+  return String(Math.round(v));
+}
+
+// ── Fetch volume data for one NSE symbol via YF v8 chart ───────
+// Returns { sym, name, price, chgPct, todayVol, avgVol20, ratio } or null
+async function _vsFetchOne(sym, yfSym) {
+  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + yfSym
+            + '?interval=1d&range=25d';
+  const PROXIES = [
+    u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
+    u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+    u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+  ];
+
+  let raw = null;
+  // Try direct first (sometimes works)
+  for (const base of ['query1','query2']) {
+    try {
+      const r = await fetch(url.replace('query1', base), { signal: AbortSignal.timeout(6000) });
+      if (r.ok) { raw = await r.text(); break; }
+    } catch(e) {}
+  }
+  // Proxy fallback
+  if (!raw) {
+    for (const pfn of PROXIES) {
+      try {
+        const r = await fetch(pfn(url), { signal: AbortSignal.timeout(9000) });
+        if (!r.ok) continue;
+        const t = await r.text();
+        // allorigins wraps in {contents:...}
+        try { const j = JSON.parse(t); raw = j.contents || t; } catch(e) { raw = t; }
+        if (raw && raw.includes('regularMarketPrice')) break;
+      } catch(e) {}
+    }
+  }
+  if (!raw) return null;
+
+  try {
+    const json   = JSON.parse(raw);
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
+    const meta   = result.meta;
+    const vols   = result.indicators?.quote?.[0]?.volume || [];
+    if (!meta?.regularMarketPrice) return null;
+
+    const price   = meta.regularMarketPrice;
+    const prev    = meta.previousClose || meta.chartPreviousClose || price;
+    const chgPct  = prev ? ((price - prev) / prev * 100) : 0;
+
+    // today's volume = last non-null entry in the volume array
+    const todayVol = vols.filter(v => v != null).slice(-1)[0] || meta.regularMarketVolume || 0;
+
+    // 20-day avg = average of the last 20 available daily volumes (excluding today)
+    const hist    = vols.filter(v => v != null).slice(-21, -1); // up to 20 days before today
+    const avgVol20 = hist.length ? Math.round(hist.reduce((a,b) => a+b, 0) / hist.length) : null;
+
+    const ratio   = (avgVol20 && avgVol20 > 0) ? +(todayVol / avgVol20).toFixed(2) : null;
+    const name    = meta.shortName || meta.longName || sym;
+
+    return { sym, name, price, chgPct, todayVol, avgVol20, ratio };
+  } catch(e) { return null; }
+}
+
+// ── Fetch all NSE stocks in parallel batches ───────────────────
+async function _vsFetchAll() {
+  if (_vsFetching) return;
+  _vsFetching = true;
+
+  const el = document.getElementById('vsLastUpdated');
+  if (el) el.textContent = 'Fetching…';
+
+  const nseEntries = Object.entries(YF_STOCK_MAP).filter(([,v]) => v.endsWith('.NS'));
+  const BATCH = 8; // parallel requests per wave — respect proxy rate limits
+  const results = [];
+
+  for (let i = 0; i < nseEntries.length; i += BATCH) {
+    const wave = nseEntries.slice(i, i + BATCH);
+    const settled = await Promise.allSettled(
+      wave.map(([sym, yfSym]) => _vsFetchOne(sym, yfSym))
+    );
+    settled.forEach(r => { if (r.status === 'fulfilled' && r.value) results.push(r.value); });
+    // Progressive render after each wave so user sees data building up
+    if (results.length) _vsRender(results);
+    await new Promise(r => setTimeout(r, 200)); // small gap between waves
+  }
+
+  _vsData      = results;
+  _vsLastFetch = Date.now();
+  _vsFetching  = false;
+
+  const ts = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true, timeZone:'Asia/Kolkata' }) + ' IST';
+  if (el) el.textContent = 'Updated ' + ts;
+}
+
+// ── Render the table ───────────────────────────────────────────
+function _vsRender(data) {
+  const body = document.getElementById('volumeShockersBody');
+  if (!body) return;
+
+  // Sort
+  const sorted = [...data].sort((a, b) => {
+    if (_vsSort === 'today') return (b.todayVol||0) - (a.todayVol||0);
+    if (_vsSort === 'avg')   return (b.avgVol20||0) - (a.avgVol20||0);
+    return (b.ratio||0) - (a.ratio||0); // default: ratio
+  });
+
+  const ratioColor = r => {
+    if (r == null) return 'var(--text3)';
+    if (r >= 3)    return '#ff6b35';  // 🔥 extreme spike
+    if (r >= 2)    return 'var(--green)';
+    if (r >= 1.5)  return '#00aaff';
+    if (r < 0.5)   return 'var(--red)';
+    return 'var(--text3)';
+  };
+
+  const ratioLabel = r => {
+    if (r == null) return '—';
+    if (r >= 3)    return r.toFixed(2) + 'x 🔥';
+    if (r >= 2)    return r.toFixed(2) + 'x ⚡';
+    if (r >= 1.5)  return r.toFixed(2) + 'x ↑';
+    return r.toFixed(2) + 'x';
+  };
+
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+  html += '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--bg);">'
+    + '<th style="text-align:left;padding:10px 12px;font-family:Space Mono,monospace;font-size:10px;color:var(--text3);font-weight:700;letter-spacing:1px;">SYMBOL</th>'
+    + '<th style="text-align:right;padding:10px 8px;font-family:Space Mono,monospace;font-size:10px;color:var(--text3);font-weight:700;letter-spacing:1px;">PRICE</th>'
+    + '<th style="text-align:right;padding:10px 8px;font-family:Space Mono,monospace;font-size:10px;color:var(--text3);font-weight:700;letter-spacing:1px;">CHG%</th>'
+    + '<th style="text-align:right;padding:10px 8px;font-family:Space Mono,monospace;font-size:10px;color:var(--green);font-weight:700;letter-spacing:1px;">TODAY VOL</th>'
+    + '<th style="text-align:right;padding:10px 8px;font-family:Space Mono,monospace;font-size:10px;color:var(--text3);font-weight:700;letter-spacing:1px;">AVG VOL (20D)</th>'
+    + '<th style="text-align:right;padding:10px 12px;font-family:Space Mono,monospace;font-size:10px;color:var(--accent);font-weight:700;letter-spacing:1px;">VOL RATIO</th>'
+    + '</tr></thead><tbody>';
+
+  sorted.forEach((row, i) => {
+    const chgCol = row.chgPct >= 0 ? 'var(--green)' : 'var(--red)';
+    const chgStr = (row.chgPct >= 0 ? '+' : '') + row.chgPct.toFixed(2) + '%';
+    const rc     = ratioColor(row.ratio);
+    const bg     = i % 2 === 0 ? 'var(--bg2)' : 'var(--bg)';
+
+    html += '<tr style="background:' + bg + ';border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;" '
+          + 'onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='' + bg + ''" '
+          + 'onclick="openStockDetail('' + row.sym + '')">'
+      + '<td style="padding:10px 12px;">'
+        + '<div style="font-weight:800;color:var(--text);font-size:13px;">' + row.sym + '</div>'
+        + '<div style="font-size:10px;color:var(--text3);margin-top:1px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + row.name + '</div>'
+      + '</td>'
+      + '<td style="text-align:right;padding:10px 8px;font-family:Space Mono,monospace;font-weight:700;color:var(--text);">₹' + (row.price < 10 ? row.price.toFixed(4) : row.price < 100 ? row.price.toFixed(2) : Math.round(row.price).toLocaleString('en-IN')) + '</td>'
+      + '<td style="text-align:right;padding:10px 8px;font-family:Space Mono,monospace;font-weight:700;color:' + chgCol + ';">' + chgStr + '</td>'
+      + '<td style="text-align:right;padding:10px 8px;font-family:Space Mono,monospace;font-weight:600;color:var(--green);">' + _vsFmt(row.todayVol) + '</td>'
+      + '<td style="text-align:right;padding:10px 8px;font-family:Space Mono,monospace;color:var(--text2);">' + _vsFmt(row.avgVol20) + '</td>'
+      + '<td style="text-align:right;padding:10px 12px;font-family:Space Mono,monospace;font-weight:800;color:' + rc + ';font-size:13px;">' + ratioLabel(row.ratio) + '</td>'
+    + '</tr>';
+  });
+
+  html += '</tbody></table>';
+  body.innerHTML = html;
+}
+
+// ── Public entry point — called by tab switch & refresh button ─
+function refreshVolumeShockers(force) {
+  const panel = document.getElementById('volumeShockersPanel');
+  if (!panel || panel.style.display === 'none') return;
+
+  // Use cache if recent enough and not forced
+  if (!force && _vsData.length && (Date.now() - _vsLastFetch) < VS_CACHE_MS) {
+    _vsRender(_vsData);
+    return;
+  }
+
+  // Show skeleton immediately
+  const body = document.getElementById('volumeShockersBody');
+  if (body && !_vsData.length) {
+    body.innerHTML = '<div style="text-align:center;padding:60px 20px;">'
+      + '<div class="loading-spin" style="margin:0 auto 16px;"></div>'
+      + '<div style="font-size:13px;font-weight:700;color:var(--text2);">Fetching live volume data…</div>'
+      + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Pulling 25-day chart data for all NSE stocks</div>'
+      + '</div>';
+  }
+
+  _vsFetchAll();
+}
+
+// ── Auto-refresh every 30 s while the Volume Shockers tab is active ──
+setInterval(() => {
+  const panel = document.getElementById('volumeShockersPanel');
+  if (panel && panel.style.display !== 'none' && !document.hidden) {
+    refreshVolumeShockers(true);
+  }
+}, 30000);
+
 
 // Also refresh stories when live data arrives
 const _origOnLiveDataUpdate = typeof onLiveDataUpdate === 'function' ? onLiveDataUpdate : null;
