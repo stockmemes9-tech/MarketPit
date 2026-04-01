@@ -751,7 +751,7 @@ header {
   #heroNifty, #heroBankNifty, #heroBtc { font-size: 13px !important; }
 
   /* Stories */
-  #storiesBar { padding: 4px 8px !important; gap: 6px !important; }
+  #storiesBar { display: flex !important; padding: 4px 8px !important; gap: 6px !important; min-height: 56px !important; }
   .story-bubble { width: 44px !important; }
   .story-ring { width: 36px !important; height: 36px !important; }
   .story-ring-inner { font-size: 14px !important; }
@@ -1274,7 +1274,7 @@ header {
     (function tryStories(n){
       if(typeof renderStoryBubbles==='function'&&typeof STORY_SUBJECTS!=='undefined'){
         renderStoryBubbles();
-        if(typeof buildStories==='function') setTimeout(buildStories,1000);
+        if(typeof buildStories==='function') buildStories();
       } else if(n<80) setTimeout(function(){tryStories(n+1);},200);
     })(0);
     </script>
