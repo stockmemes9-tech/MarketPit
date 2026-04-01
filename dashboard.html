@@ -1079,6 +1079,10 @@ header {
       <svg class="ti" viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5v-3z"/></svg>
       Market Feed
     </button>
+     <button class="nav-tab" onclick="openStoriesHub(this)">
+      <svg class="ti" viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zm0 1.4a5.1 5.1 0 1 0 0 10.2A5.1 5.1 0 0 0 8 2.9zm0 1.7a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8z"/></svg>
+      Stories
+    </button>
  <button class="nav-tab" onclick="openStoriesHub(this)">
       <svg class="ti" viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zm0 1.4a5.1 5.1 0 1 0 0 10.2A5.1 5.1 0 0 0 8 2.9zm0 1.7a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8z"/></svg>
       Stories
@@ -12633,13 +12637,61 @@ const STORY_SUBJECTS = [
   {id:'CRUDE',      label:'Crude Oil',  emoji:'🛢️', type:'commodity', yf:'CL=F',          newsQ:'crude oil WTI price today'},
   {id:'SILVER',     label:'Silver',     emoji:'🪙', type:'commodity', yf:'SI=F',          newsQ:'silver price MCX India today'},
 ];
-
+const STORY_NEWS_CANDIDATES = [
+  // Stocks
+  {id:'NIFTY',      label:'Nifty 50',   emoji:'📈', type:'stock',     yf:'^NSEI',         newsQ:'Nifty 50 index India today', keywords:['nifty','nifty 50']},
+  {id:'SENSEX',     label:'Sensex',     emoji:'🏛️', type:'stock',     yf:'^BSESN',        newsQ:'Sensex index BSE today', keywords:['sensex','bse sensex']},
+  {id:'ICICIBANK',  label:'ICICI Bank', emoji:'🏦', type:'stock',     yf:'ICICIBANK.NS',  newsQ:'ICICI Bank stock NSE today', keywords:['icici','icici bank']},
+  {id:'LT',         label:'L&T',        emoji:'🏗️', type:'stock',     yf:'LT.NS',         newsQ:'Larsen and Toubro LT stock NSE today', keywords:['l&t','larsen','toubro','lt stock']},
+  {id:'ITC',        label:'ITC',        emoji:'🚬', type:'stock',     yf:'ITC.NS',        newsQ:'ITC stock NSE today', keywords:['itc']},
+  {id:'BHARTIARTL', label:'Airtel',     emoji:'📡', type:'stock',     yf:'BHARTIARTL.NS', newsQ:'Bharti Airtel stock NSE today', keywords:['airtel','bharti']},
+  // Crypto
+  {id:'BNB',        label:'BNB',        emoji:'🟡', type:'crypto',    cg:'binancecoin',   newsQ:'BNB Binance coin news today', keywords:['bnb','binance coin']},
+  {id:'XRP',        label:'XRP',        emoji:'💠', type:'crypto',    cg:'ripple',        newsQ:'XRP Ripple crypto news today', keywords:['xrp','ripple']},
+  {id:'DOGE',       label:'Dogecoin',   emoji:'🐶', type:'crypto',    cg:'dogecoin',      newsQ:'Dogecoin DOGE crypto news today', keywords:['doge','dogecoin']},
+  // Commodities
+  {id:'NATGAS',     label:'Natural Gas',emoji:'🔥', type:'commodity', yf:'NG=F',          newsQ:'natural gas futures price today', keywords:['natural gas','natgas','henry hub gas']},
+  {id:'COPPER',     label:'Copper',     emoji:'🟠', type:'commodity', yf:'HG=F',          newsQ:'copper futures price today', keywords:['copper']},
+];
 let _stories = {};          // {id: {price, chg, up, news, ts}}
 let _seenStories = new Set(JSON.parse(localStorage.getItem('mp_seen_stories')||'[]'));
 let _storyIdx = 0;
 let _storyTimer = null;
 const STORY_DURATION = 8000; // 8s per slide
+async function expandStorySubjectsFromNews() {
+  try {
+    const news = await _fetchNewsItems('markets', 40);
+    if (!Array.isArray(news) || !news.length) return;
 
+    const titles = news.map(n => String(n.title || '').toLowerCase()).filter(Boolean);
+    if (!titles.length) return;
+
+    const existing = new Set(STORY_SUBJECTS.map(s => s.id));
+    const ranked = STORY_NEWS_CANDIDATES
+      .filter(c => !existing.has(c.id))
+      .map(c => {
+        const keys = c.keywords && c.keywords.length ? c.keywords : [c.label.toLowerCase()];
+        const score = titles.reduce((acc, t) => acc + (keys.some(k => t.includes(k)) ? 1 : 0), 0);
+        return { ...c, score };
+      })
+      .filter(c => c.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    if (!ranked.length) return;
+
+    const addCaps = { stock: 3, crypto: 2, commodity: 2 };
+    const addedByType = { stock: 0, crypto: 0, commodity: 0 };
+    let totalAdded = 0;
+    for (const c of ranked) {
+      if (totalAdded >= 6) break;
+      const t = c.type || 'stock';
+      if ((addedByType[t] || 0) >= (addCaps[t] || 2)) continue;
+      STORY_SUBJECTS.push({ id:c.id, label:c.label, emoji:c.emoji, type:c.type, yf:c.yf, cg:c.cg, newsQ:c.newsQ });
+      addedByType[t] = (addedByType[t] || 0) + 1;
+      totalAdded++;
+    }
+  } catch(e) {}
+}
 // ── Build stories from live data ──
 async function buildStories() {
   const track = document.getElementById('storiesTrack');
@@ -12647,6 +12699,8 @@ async function buildStories() {
 
   // ── Yield to browser first so the page stays responsive ──
   await new Promise(r => setTimeout(r, 0));
+// Expand story universe from current market news (adds extra stocks/crypto/commodities in headlines)
+  await expandStorySubjectsFromNews();
 
   // ── Render bubbles with whatever data we have now ──
   renderStoryBubbles();
