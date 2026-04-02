@@ -4698,7 +4698,7 @@ function renderProfileModal() {
     + '<div style="position:absolute;top:10px;left:10px;z-index:10;"><button onclick="closeModal(\"profileModal\")" style="width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button></div>'
 
     // Full-bleed background (banner image or gradient)
-    + '<div onclick="editBanner()" title="Change banner" style="position:absolute;inset:0;background:' + bannerBg + ';cursor:pointer;transition:opacity 0.2s;"></div>'
+    + '<div onclick="editBanner()" title="Change banner" style="position:absolute;inset:0;z-index:1;background:' + bannerBg + ';cursor:pointer;transition:opacity 0.2s;"></div>'
 
     // Heavy gradient overlay from bottom — the key visual effect
     + '<div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,0.05) 0%,rgba(0,0,0,0.15) 35%,rgba(0,0,0,0.82) 65%,rgba(0,0,0,0.97) 100%);pointer-events:none;"></div>'
