@@ -109,6 +109,23 @@ body[class*='bg-'] .content-area {
   z-index: 10;
   position: relative;
 }
+/* Accessibility: Reduce Motion */
+body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+/* Accessibility: High Contrast */
+body.high-contrast {
+  --border: rgba(255,255,255,0.35);
+  --border2: rgba(100,180,255,0.6);
+  --text2: var(--text);
+}
+body.high-contrast.theme-dim, body.high-contrast.theme-dark {
+  --border: rgba(255,255,255,0.4);
+  --text2: #d0d8e0;
+  --text3: #8899b0;
+}
 
 /* ACCENT COLORS */
 body.accent-blue   { --accent:#0070f3; }
@@ -2239,12 +2256,12 @@ window.submitMobilePost = function() {
 
 <!-- SETTINGS MODAL -->
 <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeModal('settingsModal')">
-  <div class="modal" style="width:420px;max-height:85vh;overflow-y:auto;" onclick="event.stopPropagation()">
-    <div class="modal-header">
+  <div class="modal" style="width:460px;max-height:90vh;display:flex;flex-direction:column;padding:0;overflow:hidden;" onclick="event.stopPropagation()">
+    <div class="modal-header" style="padding:16px 20px;flex-shrink:0;border-bottom:1px solid var(--border);margin-bottom:0;">
       <span class="modal-title" id="settingsTitle">SETTINGS</span>
       <button class="modal-close" onclick="closeModal('settingsModal')">✕</button>
     </div>
-    <div id="settingsBody"></div>
+    <div id="settingsBody" style="overflow-y:auto;flex:1;padding:8px 20px 20px;-webkit-overflow-scrolling:touch;"></div>
   </div>
 </div>
 
@@ -5559,21 +5576,39 @@ function applySettings(s) {
     if (ticker) ticker.style.background = isDark ? 'rgba(0,0,0,0.3)' : 'transparent';
   } catch(e) {}
   const body = document.body;
-  // Theme — dim is default, dark gets dark class, light gets light class
+  // Theme
   body.classList.remove('theme-dim','theme-dark');
   const resolvedTheme = s.theme || 'dim';
   if (resolvedTheme === 'dim')  body.classList.add('theme-dim');
   if (resolvedTheme === 'dark') body.classList.add('theme-dark');
-  // light = no class needed (root CSS is light)
   // Accent
   body.classList.remove('accent-blue','accent-yellow','accent-pink','accent-purple','accent-orange','accent-green');
   if (s.accent) body.classList.add('accent-' + s.accent);
-  // Font
+  // Font size
   body.classList.remove('font-small','font-normal','font-large');
   if (s.fontSize) body.classList.add('font-' + s.fontSize);
   // Background theme
   body.classList.remove('bg-cosmos','bg-aurora','bg-sunset','bg-forest','bg-ocean','bg-sakura','bg-midnight','bg-gold','bg-neon','bg-sunny');
   if (s.bgTheme && s.bgTheme !== 'none') body.classList.add('bg-' + s.bgTheme);
+  // Accessibility
+  const a = s.access || {};
+  // Reduce motion — disable CSS transitions/animations
+  if (a.reduceMotion) {
+    body.classList.add('reduce-motion');
+  } else {
+    body.classList.remove('reduce-motion');
+  }
+  // High contrast — increase border/text contrast
+  if (a.highContrast) {
+    body.classList.add('high-contrast');
+  } else {
+    body.classList.remove('high-contrast');
+  }
+  // Large text override
+  if (a.largeText) {
+    body.classList.remove('font-small','font-normal');
+    body.classList.add('font-large');
+  }
 }
 
 function openSettings(page) {
@@ -5669,12 +5704,18 @@ function renderSettings(page) {
         <!-- THEME -->
         <div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:1px;margin-bottom:12px;">THEME</div>
         <div style="display:flex;gap:10px;margin-bottom:24px;">
-          ${THEMES.map(t => `
-            <div onclick="setSetting('theme','${t.id}')" style="flex:1;border:2px solid ${curTheme===t.id?'var(--accent)':'var(--border)'};border-radius:12px;padding:14px 8px;text-align:center;cursor:pointer;transition:all 0.15s;background:${t.id==='dark'?'#000':t.id==='dim'?'#15202b':'#fff'};">
+          ${THEMES.map(t => {
+            const bg = t.id==='dark'?'#000':t.id==='dim'?'#15202b':'#f0f4f8';
+            const fg = t.id==='light'?'#0f1923':'#e7e9ea';
+            const sub = t.id==='light'?'#8a9db0':'#536471';
+            const active = curTheme===t.id;
+            return `<div onclick="setSetting('theme','${t.id}')" style="flex:1;border:2px solid ${active?'var(--accent)':'var(--border)'};border-radius:12px;padding:14px 8px;text-align:center;cursor:pointer;transition:all 0.15s;background:${bg};">
               <div style="font-size:22px;margin-bottom:6px;">${t.icon}</div>
-              <div style="font-size:12px;font-weight:700;color:${t.id==='light'?'#0f1923':'#e7e9ea'};">${t.label}</div>
-              <div style="font-size:10px;color:${t.id==='light'?'#8a9db0':'#536471'};margin-top:2px;">${t.desc}</div>
-            </div>`).join('')}
+              <div style="font-size:12px;font-weight:700;color:${fg};">${t.label}</div>
+              <div style="font-size:10px;color:${sub};margin-top:2px;">${t.desc}</div>
+              ${active?`<div style="width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;margin:6px auto 0;">✓</div>`:''}
+            </div>`;
+          }).join('')}
         </div>
 
         <!-- ACCENT COLOR -->
@@ -5788,7 +5829,7 @@ function renderSettings(page) {
     el.innerHTML = `
       <button onclick="renderSettings('main')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
       ${langs.map(([id,flag,name]) => `
-        <div onclick="setSetting('language','${id}')" style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);cursor:pointer;">
+        <div onclick="setSetting('language','${id}','language')" style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);cursor:pointer;">
           <span style="font-size:22px;">${flag}</span>
           <span style="font-size:14px;font-weight:600;color:var(--text);flex:1;">${name}</span>
           ${cur===id?'<span style="color:var(--accent);font-size:18px;">✓</span>':''}
@@ -5857,12 +5898,12 @@ function renderSettings(page) {
   }
 }
 
-function setSetting(key, value) {
+function setSetting(key, value, page) {
   const s = getSettings();
   s[key] = value;
   saveSettings(s);
   applySettings(s);
-  renderSettings('display');
+  renderSettings(page || 'display');
 }
 
 function toggleNotif(key) {
@@ -5886,11 +5927,7 @@ function toggleAccess(key) {
   if (!s.access) s.access = {};
   s.access[key] = !s.access[key];
   saveSettings(s);
-  if (s.access.reduceMotion) {
-    document.body.style.setProperty('--transition', 'none');
-  } else {
-    document.body.style.removeProperty('--transition');
-  }
+  applySettings(s);
   renderSettings('access');
 }
 
