@@ -781,6 +781,31 @@ header {
 
   /* Show drawer buttons in header */
   .mp-btn-left, .mp-btn-right { display: flex !important; }
+
+  /* Profile modal — full-width bottom sheet on mobile */
+  #profileModal {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+  #profileModal .modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 22px 22px 0 0 !important;
+    max-height: 93vh !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    animation: profileSheetIn 0.28s cubic-bezier(0.32,0.72,0,1) !important;
+  }
+  #profileBody {
+    max-height: calc(93vh) !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    border-radius: 22px 22px 0 0 !important;
+  }
+  @keyframes profileSheetIn {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+  }
 }
 
 @media (max-width: 480px) {
@@ -2237,9 +2262,9 @@ window.submitMobilePost = function() {
 
 <!-- PROFILE MODAL -->
 <div class="modal-overlay" id="profileModal" onclick="if(event.target===this)closeModal('profileModal')">
-  <div class="modal" style="width:480px;padding:0;overflow:hidden;" onclick="event.stopPropagation()">
+  <div class="modal" style="width:480px;max-width:95vw;padding:0;overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
     <span id="profileModalTitle" style="display:none;"></span>
-    <div id="profileBody" style="overflow-y:auto;max-height:88vh;border-radius:16px;"></div>
+    <div id="profileBody" style="overflow-y:auto;max-height:88vh;border-radius:16px;flex:1;"></div>
   </div>
 </div>
 
