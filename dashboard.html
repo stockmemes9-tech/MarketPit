@@ -2735,8 +2735,23 @@ async function yfFetch(yfSym) {
 
 // Batch-fetch multiple YF symbols at once via v7/finance/quote
 // Returns Map<yfSym, {price, prev, chg, up}>
+// Concurrency limiter — max 2 simultaneous yfBatchFetch calls to prevent proxy hammering
+let _yfConcurrent = 0;
+const _YF_MAX_CONCURRENT = 2;
 async function yfBatchFetch(yfSyms) {
   if (!yfSyms || !yfSyms.length) return new Map();
+  // Queue if too many concurrent fetches — prevents 30s freeze on load
+  while (_yfConcurrent >= _YF_MAX_CONCURRENT) {
+    await new Promise(r => setTimeout(r, 300));
+  }
+  _yfConcurrent++;
+  try {
+    return await _yfBatchFetchInner(yfSyms);
+  } finally {
+    _yfConcurrent--;
+  }
+}
+async function _yfBatchFetchInner(yfSyms) {
   const result  = new Map();
   const symsStr = yfSyms.join(',');
   const v7url   = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symsStr)}&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent`;
@@ -9801,25 +9816,30 @@ function _mpInit() {
   renderTrending(liveStocks);
   updateWhatsMoving();   // shows static gainers/losers immediately
   onLiveDataUpdate();
-  // ── STEP 2: Fire ALL live fetches in parallel — don't wait for Railway ──
+  // ── STEP 2: Stagger live fetches — prevents parallel proxy hammering that freezes the UI ──
+  // Tier 1 (0ms): lightweight / fast fetches only
   fetchCryptoLive();
-  _fetchIndicesVercel();
-  fetchPriorityStocks();
-  _fastBootstrapStocks();
-  _fetchAllMovers();
-  fetchLiveData();
   loadSymbols();
+  // Tier 2 (300ms): indices — small batch, fast
+  setTimeout(() => { _fetchIndicesVercel(); }, 300);
+  // Tier 3 (800ms): priority stocks (top 10) — small, returns quickly
+  setTimeout(() => { fetchPriorityStocks(); }, 800);
+  // Tier 4 (2500ms): movers — medium batch, after UI is painted
+  setTimeout(() => { _fetchAllMovers(); }, 2500);
+  // Tier 5 (5000ms): full bootstrap — heavy, runs after UI is fully responsive
+  // fetchLiveData() removed — it duplicates fetchCryptoLive + _fastBootstrapStocks
+  setTimeout(() => { _fastBootstrapStocks(); }, 5000);
 
   // ── STEP 3: Safety re-renders — update sidebar as data arrives ──
   setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); }, 2000);
-  setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); updateTickerFromLive(); }, 5000);
-  setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); updateTickerFromLive(); }, 10000);
+  setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); updateTickerFromLive(); }, 7000);
+  setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); updateTickerFromLive(); }, 13000);
   // Pre-load news only after heavier fetches are done, and only if news tab is active
   setTimeout(() => {
     if (window._activePage === 'news') {
       loadNews('markets', document.getElementById('nc_markets'));
     }
-  }, 6000);
+  }, 9000);
 }
 
 // Fetch Nifty/BankNifty/Sensex directly from Yahoo Finance (no backend needed)
@@ -12546,7 +12566,312 @@ function renderHeatmap() {
 
 </script>
 
+<div class="mp-drawer-overlay" id="mpOverlay" onclick="mpCloseDrawer()"></div>
 
+<!-- LEFT DRAWER: Twitter-style nav -->
+<style>
+/* Compact professional drawer nav — mobile only */
+#mpLeft {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg2) !important; /* always match active theme */
+}
+.tw-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+  flex-shrink: 0;
+}
+.tw-drawer-avatar {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; color: #fff;
+  flex-shrink: 0;
+}
+.tw-drawer-close {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text3);
+  font-size: 13px;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.tw-drawer-close:active { opacity: 0.7; }
+.tw-drawer-userinfo {
+  padding: 0 14px 10px;
+  flex-shrink: 0;
+}
+.tw-drawer-username {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  line-height: 1.2;
+}
+.tw-drawer-handle {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: 'DM Sans', sans-serif;
+  margin-top: 1px;
+}
+.tw-drawer-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+  flex-shrink: 0;
+}
+/* Compact nav row */
+.tw-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border-radius: 8px;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+  color: var(--text2);
+}
+.tw-nav-row:active { background: var(--bg3); }
+.tw-nav-row-icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.tw-nav-row-label {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'DM Sans', sans-serif;
+  color: var(--text2);
+  line-height: 1.2;
+}
+.tw-nav-section-label {
+  font-size: 9px;
+  font-family: 'Space Mono', monospace;
+  color: var(--text3);
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  padding: 8px 14px 3px;
+  flex-shrink: 0;
+}
+/* Post button */
+.tw-drawer-post-btn {
+  margin: 10px 12px 14px;
+  padding: 10px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  width: calc(100% - 24px);
+  text-align: center;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.tw-drawer-post-btn:active { opacity: 0.8; }
+</style>
 
+<div class="mp-drawer mp-drawer-left" id="mpLeft">
+  <!-- Header: avatar + close -->
+  <div class="tw-drawer-head">
+    <div class="tw-drawer-avatar" id="drawerAvatar">M</div>
+    <button class="tw-drawer-close" onclick="mpCloseDrawer()">✕</button>
+  </div>
 
+  <!-- User info -->
+  <div class="tw-drawer-userinfo">
+    <div class="tw-drawer-username" id="drawerUsername">Trader</div>
+    <div class="tw-drawer-handle" id="drawerHandle">@marketpit</div>
+  </div>
+
+  <div class="tw-drawer-divider"></div>
+
+  <!-- Primary nav -->
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'feed');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">⚡</span>
+    <span class="tw-nav-row-label">Market Feed</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'screener');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🔍</span>
+    <span class="tw-nav-row-label">Screener</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'watchlist');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">⭐</span>
+    <span class="tw-nav-row-label">Watchlist</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'news');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">📰</span>
+    <span class="tw-nav-row-label">News</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'alerts');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🔔</span>
+    <span class="tw-nav-row-label">Alerts</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'messages');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">💬</span>
+    <span class="tw-nav-row-label">Messages</span>
+  </button>
+
+  <div class="tw-drawer-divider" style="margin-top:6px;"></div>
+
+  <!-- Markets section -->
+  <div class="tw-nav-section-label">MARKETS</div>
+  <button class="tw-nav-row" onclick="filterFeed('',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">📊</span>
+    <span class="tw-nav-row-label">All Markets</span>
+  </button>
+  <button class="tw-nav-row" onclick="filterFeed('Stocks',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🏦</span>
+    <span class="tw-nav-row-label">Equities</span>
+  </button>
+  <button class="tw-nav-row" onclick="filterFeed('Crypto',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">₿</span>
+    <span class="tw-nav-row-label">Crypto</span>
+  </button>
+  <button class="tw-nav-row" onclick="filterFeed('Commodities',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🛢️</span>
+    <span class="tw-nav-row-label">Commodities</span>
+  </button>
+  <button class="tw-nav-row" onclick="filterFeed('Macro',this);mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🌍</span>
+    <span class="tw-nav-row-label">Macro</span>
+  </button>
+
+  <div class="tw-drawer-divider" style="margin-top:6px;"></div>
+
+  <!-- Tools section -->
+  <div class="tw-nav-section-label">TOOLS</div>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'heatmap');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🌡️</span>
+    <span class="tw-nav-row-label">Heatmap</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'paper');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">📝</span>
+    <span class="tw-nav-row-label">Paper Trade</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'ipo');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🚀</span>
+    <span class="tw-nav-row-label">IPO Watch</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'earnings');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">📊</span>
+    <span class="tw-nav-row-label">Earnings</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'fii');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🌍</span>
+    <span class="tw-nav-row-label">FII / DII</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'compare');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">⚖️</span>
+    <span class="tw-nav-row-label">Compare</span>
+  </button>
+  <button class="tw-nav-row" onclick="switchTabMobile(null,'mf');mpCloseDrawer()">
+    <span class="tw-nav-row-icon">🏦</span>
+    <span class="tw-nav-row-label">Mutual Funds</span>
+  </button>
+
+  <!-- Post button -->
+  <div style="flex:1;min-height:16px;"></div>
+  <button class="tw-drawer-post-btn" onclick="mpCloseDrawer();setTimeout(openMobileCompose,200)">
+    Post to Pit
+  </button>
+</div>
+
+<script>
+// Populate drawer avatar + name from logged-in user
+(function syncDrawerUser() {
+  function _sync() {
+    var user = typeof getUser === 'function' ? getUser() : null;
+    var av = document.getElementById('drawerAvatar');
+    var un = document.getElementById('drawerUsername');
+    var uh = document.getElementById('drawerHandle');
+    if (user && user.name) {
+      if (av) { av.textContent = user.name.charAt(0).toUpperCase(); }
+      if (un) { un.textContent = user.name; }
+      if (uh) { uh.textContent = '@' + user.name.toLowerCase().replace(/\s+/g,''); }
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function(){ setTimeout(_sync, 800); });
+  } else {
+    setTimeout(_sync, 800);
+  }
+})();
+</script>
+
+<!-- RIGHT DRAWER: Markets data -->
+<div class="mp-drawer mp-drawer-right" id="mpRight">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">
+    <span style="font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:1.5px;color:var(--text);">MARKETS</span>
+    <button onclick="mpCloseDrawer()" style="width:30px;height:30px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);cursor:pointer;font-size:16px;color:var(--text3);">✕</button>
+  </div>
+  <div id="mpRightContent" style="padding:10px 12px;">
+    <div style="color:var(--text3);font-size:12px;text-align:center;padding:20px;">Loading…</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  function isMobile(){ return window.innerWidth <= 768; }
+
+  function setDrawerBtns(){
+    var d = isMobile() ? 'flex' : 'none';
+    document.querySelectorAll('.mp-btn-left,.mp-btn-right').forEach(function(b){ b.style.display = d; });
+  }
+  setDrawerBtns();
+  window.addEventListener('resize', setDrawerBtns);
+
+  window.mpOpenDrawer = function(side){
+    if(!isMobile()) return; // never open drawers on desktop
+    if(side === 'right'){
+      var el = document.getElementById('mpRightContent');
+      if(el){
+        var mmi    = document.getElementById('sidebarMmiContent');
+        var movers = document.getElementById('whatsMoving');
+        var trend  = document.getElementById('trendListRows');
+        el.innerHTML =
+          '<div style="font-family:Space Mono,monospace;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text);margin-bottom:8px;">😊 MARKET MOOD</div>'
+          + (mmi ? mmi.innerHTML : '') +
+          '<div style="height:1px;background:var(--border);margin:12px 0;"></div>'
+          + (movers ? movers.outerHTML.replace(' id="whatsMoving"',' id="mpMovers"') : '') +
+          '<div style="height:1px;background:var(--border);margin:12px 0;"></div>'
+          + '<div style="font-family:Space Mono,monospace;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--text);margin-bottom:8px;">📈 TRENDING NOW</div>'
+          + (trend ? trend.innerHTML : '');
+      }
+    }
+    var drawer  = document.getElementById(side==='left' ? 'mpLeft' : 'mpRight');
+    var overlay = document.getElementById('mpOverlay');
+    if(drawer)  drawer.classList.add('open');
+    if(overlay) overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  };
+
+  window.mpCloseDrawer = function(){
+    document.querySelectorAll('.mp-drawer').forEach(function(d){ d.classList.remove('open'); });
+    var overlay = document.getElementById('mpOverlay');
+    if(overlay) overlay.classList.remove('open');
+    document.body.style.overflow = '';
+  };
+})();
+</script>
+</body>
+</html>
 
