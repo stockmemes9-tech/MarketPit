@@ -10074,6 +10074,11 @@ function renderSidebarMmi() {
 
 
   score = Math.max(0, Math.min(100, score));
+
+  // ── Override with Tickertape real MMI if fetched ──────────────────
+  const ttSrc = _mmiData && _mmiData.ttSource && _mmiData.ttScore != null;
+  if (ttSrc) score = Math.max(0, Math.min(100, _mmiData.ttScore));
+
   let zone, zoneCol, emoji;
   if      (score >= 75) { zone='Extreme Greed'; zoneCol='#00c853'; emoji='🤑'; }
   else if (score >= 55) { zone='Greed';         zoneCol='#69f0ae'; emoji='😄'; }
@@ -10083,7 +10088,7 @@ function renderSidebarMmi() {
 
   const angle = -90 + (score / 100) * 180;
   const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
-  if (tsEl) tsEl.textContent = ts + ' IST';
+  if (tsEl) tsEl.textContent = ts + ' IST' + (ttSrc ? ' · ✓ TT' : '');
 
   // ── Full-width centered layout ──
   let html = '<div style="text-align:center;padding:4px 0 10px;">'
@@ -10148,75 +10153,135 @@ async function renderMmi() {
 }
 
 async function _fetchMmiData() {
-  // Fetch India VIX, Nifty, BankNifty, Sensex directly via yfBatchFetch (no backend)
+  // ── Step 1: Try Tickertape MMI API (most accurate India MMI) ──────
+  let ttScore = null, ttZone = null, ttSource = false;
+  try {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 6000);
+    const ttRes = await fetch('https://api.tickertape.in/market-mood-index/12m', {
+      headers: { 'Accept': 'application/json' },
+      signal: ctrl.signal
+    });
+    clearTimeout(tid);
+    if (ttRes.ok) {
+      const ttData = await ttRes.json();
+      const arr = ttData && ttData.data;
+      if (arr && arr.length) {
+        const latest = arr[arr.length - 1];
+        ttScore  = typeof latest.value === 'number' ? Math.round(latest.value) : null;
+        ttZone   = latest.classification || null;
+        ttSource = ttScore != null;
+      }
+    }
+  } catch(e) { /* CORS / timeout — fall through to calculated score */ }
+
+  // ── Step 2: Fetch supporting market data (VIX, indices) via YF ───
   try {
     const syms = ['^INDIAVIX', '^NSEI', '^NSEBANK', '^BSESN'];
     const map  = await yfBatchFetch(syms);
     const get  = sym => { const d = map.get(sym); return d ? { price: d.price, chg: d.chg } : null; };
     _mmiData = {
-      vix:    get('^INDIAVIX'),
-      nifty:  get('^NSEI'),
-      bank:   get('^NSEBANK'),
-      sensex: get('^BSESN'),
-      fii:    _fiiData && _fiiData.length ? _fiiData[0] : null,
-      ts:     Date.now(),
+      vix:      get('^INDIAVIX'),
+      nifty:    get('^NSEI'),
+      bank:     get('^NSEBANK'),
+      sensex:   get('^BSESN'),
+      fii:      _fiiData && _fiiData.length ? _fiiData[0] : null,
+      ts:       Date.now(),
+      ttScore:  ttScore,
+      ttZone:   ttZone,
+      ttSource: ttSource,
     };
     _mmiLastFetch = Date.now();
-    // Also refresh _liveIndices while we have fresh index data
     if (!window._liveIndices) window._liveIndices = {};
     const mk = (d) => d ? { price: d.price, chg: (d.chg>=0?'+':'')+d.chg.toFixed(2)+'%', up: d.chg>=0 } : null;
     const n = mk(map.get('^NSEI'));    if (n) { window._liveIndices['NIFTY 50']=n;   window._liveIndices['NIFTY']=n; }
     const b = mk(map.get('^NSEBANK')); if (b) { window._liveIndices['NIFTY BANK']=b; window._liveIndices['BANKNIFTY']=b; }
     const s = mk(map.get('^BSESN'));   if (s) { window._liveIndices['SENSEX']=s; }
   } catch(e) {
-    // Fallback: use _liveIndices if already fetched
     if (!_mmiData) {
       const idx = window._liveIndices || {};
       _mmiData = {
-        nifty:  idx['NIFTY 50']   || idx['NIFTY']    || null,
-        bank:   idx['NIFTY BANK'] || idx['BANKNIFTY'] || null,
-        sensex: idx['SENSEX']     || null,
-        vix:    null,
-        fii:    _fiiData && _fiiData.length ? _fiiData[0] : null,
-        ts:     Date.now(),
+        nifty:    idx['NIFTY 50']   || idx['NIFTY']    || null,
+        bank:     idx['NIFTY BANK'] || idx['BANKNIFTY'] || null,
+        sensex:   idx['SENSEX']     || null,
+        vix:      null,
+        fii:      _fiiData && _fiiData.length ? _fiiData[0] : null,
+        ts:       Date.now(),
+        ttScore:  ttScore,
+        ttZone:   ttZone,
+        ttSource: ttSource,
       };
       _mmiLastFetch = Date.now();
+    } else {
+      _mmiData.ttScore  = ttScore;
+      _mmiData.ttZone   = ttZone;
+      _mmiData.ttSource = ttSource;
     }
   }
 }
 
 function _calcMoodScore(data) {
-  let score = 50; // neutral base
   let signals = [];
 
-  // VIX contribution (lower VIX = greed, higher = fear)
-  if (data.vix?.price) {
+  // ── Build supporting signals from live market data ────────────────
+  if (data.vix && data.vix.price != null) {
     const v = data.vix.price;
-    if (v < 12)      { score += 20; signals.push({label:'India VIX', val: v.toFixed(1), mood:'Extreme Greed', col:'#00c853'}); }
-    else if (v < 15) { score += 10; signals.push({label:'India VIX', val: v.toFixed(1), mood:'Greed', col:'#69f0ae'}); }
-    else if (v < 20) { score += 0;  signals.push({label:'India VIX', val: v.toFixed(1), mood:'Neutral', col:'#ffd740'}); }
-    else if (v < 25) { score -= 10; signals.push({label:'India VIX', val: v.toFixed(1), mood:'Fear', col:'#ff6d00'}); }
-    else             { score -= 20; signals.push({label:'India VIX', val: v.toFixed(1), mood:'Extreme Fear', col:'#d50000'}); }
+    let mood, col;
+    if      (v < 12) { mood='Extreme Greed'; col='#00c853'; }
+    else if (v < 15) { mood='Greed';         col='#69f0ae'; }
+    else if (v < 20) { mood='Neutral';       col='#ffd740'; }
+    else if (v < 25) { mood='Fear';          col='#ff6d00'; }
+    else             { mood='Extreme Fear';  col='#d50000'; }
+    signals.push({label:'India VIX', val: v.toFixed(1), mood: mood, col: col});
   }
-
-  // Nifty trend
-  if (data.nifty?.chg != null) {
+  if (data.nifty && data.nifty.chg != null) {
     const c = data.nifty.chg;
-    if (c > 1)       { score += 15; signals.push({label:'Nifty 50',   val:(c>=0?'+':'')+c.toFixed(2)+'%', mood:'Bullish',  col:'#00c853'}); }
-    else if (c > 0)  { score += 7;  signals.push({label:'Nifty 50',   val:'+'+c.toFixed(2)+'%',           mood:'Mildly Bullish', col:'#69f0ae'}); }
-    else if (c > -1) { score -= 7;  signals.push({label:'Nifty 50',   val:c.toFixed(2)+'%',               mood:'Mildly Bearish', col:'#ff6d00'}); }
-    else             { score -= 15; signals.push({label:'Nifty 50',   val:c.toFixed(2)+'%',               mood:'Bearish', col:'#d50000'}); }
+    let mood, col;
+    if      (c >  1) { mood='Bullish';       col='#00c853'; }
+    else if (c >  0) { mood='Mildly Bullish';col='#69f0ae'; }
+    else if (c > -1) { mood='Mildly Bearish';col='#ff6d00'; }
+    else             { mood='Bearish';       col='#d50000'; }
+    signals.push({label:'Nifty 50', val:(c>=0?'+':'')+c.toFixed(2)+'%', mood: mood, col: col});
   }
-
-  // Bank Nifty vs Nifty (banking sector strength)
-  if (data.bank?.chg != null && data.nifty?.chg != null) {
+  if (data.bank && data.bank.chg != null && data.nifty && data.nifty.chg != null) {
     const spread = data.bank.chg - data.nifty.chg;
-    if (spread > 0.5)       { score += 5; signals.push({label:'Bank Nifty', val:(data.bank.chg>=0?'+':'')+data.bank.chg.toFixed(2)+'%', mood:'Banks Leading', col:'#69f0ae'}); }
-    else if (spread < -0.5) { score -= 5; signals.push({label:'Bank Nifty', val:(data.bank.chg>=0?'+':'')+data.bank.chg.toFixed(2)+'%', mood:'Banks Lagging', col:'#ff6d00'}); }
-    else                    {             signals.push({label:'Bank Nifty', val:(data.bank.chg>=0?'+':'')+data.bank.chg.toFixed(2)+'%', mood:'In-line',      col:'#ffd740'}); }
+    const bc = data.bank.chg;
+    let mood, col;
+    if      (spread >  0.5) { mood='Banks Leading'; col='#69f0ae'; }
+    else if (spread < -0.5) { mood='Banks Lagging'; col='#ff6d00'; }
+    else                    { mood='In-line';        col='#ffd740'; }
+    signals.push({label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', mood: mood, col: col});
   }
 
-  score = Math.max(0, Math.min(100, score));
+  // ── Score: use Tickertape real MMI if available, else calculate ───
+  let score, ttSource = data.ttSource;
+  if (ttSource && data.ttScore != null) {
+    score = Math.max(0, Math.min(100, data.ttScore));
+  } else {
+    score = 50;
+    if (data.vix && data.vix.price != null) {
+      const v = data.vix.price;
+      if      (v < 12) score += 20;
+      else if (v < 15) score += 10;
+      else if (v < 20) score += 0;
+      else if (v < 25) score -= 10;
+      else             score -= 20;
+    }
+    if (data.nifty && data.nifty.chg != null) {
+      const c = data.nifty.chg;
+      if      (c >  1) score += 15;
+      else if (c >  0) score += 7;
+      else if (c > -1) score -= 7;
+      else             score -= 15;
+    }
+    if (data.bank && data.bank.chg != null && data.nifty && data.nifty.chg != null) {
+      const spread = data.bank.chg - data.nifty.chg;
+      if      (spread >  0.5) score += 5;
+      else if (spread < -0.5) score -= 5;
+    }
+    score = Math.max(0, Math.min(100, score));
+  }
+
   let zone, zoneCol, emoji;
   if      (score >= 75) { zone='Extreme Greed'; zoneCol='#00c853'; emoji='🤑'; }
   else if (score >= 55) { zone='Greed';         zoneCol='#69f0ae'; emoji='😄'; }
@@ -10224,11 +10289,11 @@ function _calcMoodScore(data) {
   else if (score >= 25) { zone='Fear';          zoneCol='#ff6d00'; emoji='😨'; }
   else                  { zone='Extreme Fear';  zoneCol='#d50000'; emoji='😱'; }
 
-  return { score, zone, zoneCol, emoji, signals };
+  return { score, zone, zoneCol, emoji, signals, ttSource };
 }
 
 function _renderMmiHtml(el, data) {
-  const { score, zone, zoneCol, emoji, signals } = _calcMoodScore(data);
+  const { score, zone, zoneCol, emoji, signals, ttSource } = _calcMoodScore(data);
 
   // Gauge needle angle: score 0→100 maps to -90°→90°
   const angle = -90 + (score / 100) * 180;
@@ -10239,7 +10304,7 @@ function _renderMmiHtml(el, data) {
 
   // ── Gauge ──────────────────────────────────────────────────────────
   html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px 24px 20px;margin-bottom:16px;text-align:center;">'
-    + '<div style="font-size:11px;color:var(--text3);font-family:\'Space Mono\',monospace;letter-spacing:1px;margin-bottom:16px;">MARKET MOOD INDEX · Updated ' + ts + ' IST</div>'
+    + '<div style="font-size:11px;color:var(--text3);font-family:\'Space Mono\',monospace;letter-spacing:1px;margin-bottom:16px;">MARKET MOOD INDEX · Updated ' + ts + ' IST &nbsp;' + (ttSource ? '<span style="background:rgba(0,200,120,0.12);border:1px solid rgba(0,200,120,0.3);border-radius:6px;padding:1px 7px;font-size:9px;color:#00c878;letter-spacing:0.5px;vertical-align:middle;">✓ Tickertape</span>' : '<span style="background:rgba(255,180,0,0.1);border:1px solid rgba(255,180,0,0.25);border-radius:6px;padding:1px 7px;font-size:9px;color:#ffd740;letter-spacing:0.5px;vertical-align:middle;">⚡ Calculated</span>') + '</div>'
     // SVG Gauge
     + '<div style="position:relative;display:inline-block;width:260px;">'
     + '<svg viewBox="0 0 260 150" width="260" height="150">'
