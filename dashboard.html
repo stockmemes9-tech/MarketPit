@@ -4706,17 +4706,17 @@ function renderProfileModal() {
     // Edit banner badge top-right
     + '<div onclick="editBanner()" style="position:absolute;top:12px;right:12px;font-size:10px;color:rgba(255,255,255,0.9);background:rgba(0,0,0,0.4);backdrop-filter:blur(8px);padding:4px 12px;border-radius:20px;border:1px solid rgba(255,255,255,0.2);cursor:pointer;z-index:2;">✏️ Edit banner</div>'
 
-    // Avatar — overlapping the gradient, positioned mid-bottom
-    + '<div style="position:absolute;bottom:96px;left:20px;z-index:3;">'
-      + '<div onclick="editAvatar()" style="width:68px;height:68px;border-radius:50%;background:' + (av.type==='image'?'#111':av.bg) + ';display:flex;align-items:center;justify-content:center;overflow:hidden;border:3px solid rgba(255,255,255,0.25);box-shadow:0 4px 24px rgba(0,0,0,0.5);cursor:pointer;position:relative;">'
-        + avatarHtml
-        + '<div style="position:absolute;inset:0;border-radius:50%;border:3px solid rgba(255,255,255,0.12);"></div>'
-      + '</div>'
-      + '<div style="position:absolute;bottom:1px;right:1px;width:18px;height:18px;background:var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;border:2px solid #000;">✏️</div>'
-    + '</div>'
+    // Bottom text content — sits on top of gradient, avatar in flow
+    + '<div style="position:relative;z-index:3;padding:0 20px 20px;margin-top:200px;">'
 
-    // Bottom text content — sits on top of gradient
-    + '<div style="position:relative;z-index:3;padding:0 20px 20px;margin-top:180px;">'
+      // Avatar — in normal flow, negative margin pops it above the banner edge
+      + '<div style="position:relative;display:inline-block;margin-bottom:8px;margin-top:-44px;">'
+        + '<div onclick="editAvatar()" style="width:68px;height:68px;border-radius:50%;background:' + (av.type==='image'?'#111':av.bg) + ';display:flex;align-items:center;justify-content:center;overflow:hidden;border:3px solid rgba(255,255,255,0.25);box-shadow:0 4px 24px rgba(0,0,0,0.5);cursor:pointer;position:relative;">'
+          + avatarHtml
+          + '<div style="position:absolute;inset:0;border-radius:50%;border:3px solid rgba(255,255,255,0.12);"></div>'
+        + '</div>'
+        + '<div style="position:absolute;bottom:1px;right:1px;width:18px;height:18px;background:var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;border:2px solid #000;">✏️</div>'
+      + '</div>'
 
       // Name + handle row with action buttons
       + '<div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:8px;">'
