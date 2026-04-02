@@ -2220,12 +2220,9 @@ window.submitMobilePost = function() {
 
 <!-- PROFILE MODAL -->
 <div class="modal-overlay" id="profileModal" onclick="if(event.target===this)closeModal('profileModal')">
-  <div class="modal" style="width:480px;" onclick="event.stopPropagation()">
-    <div class="modal-header">
-      <span class="modal-title" id="profileModalTitle">YOUR PROFILE</span>
-      <button class="modal-close" onclick="closeModal('profileModal')">✕</button>
-    </div>
-    <div id="profileBody"></div>
+  <div class="modal" style="width:480px;padding:0;overflow:hidden;" onclick="event.stopPropagation()">
+    <span id="profileModalTitle" style="display:none;"></span>
+    <div id="profileBody" style="overflow-y:auto;max-height:88vh;border-radius:16px;"></div>
   </div>
 </div>
 
@@ -4666,7 +4663,8 @@ function renderProfileModal() {
 
   // ── RIGHT-CARD style: image bleeds to edges, gradient overlay from bottom ──
   el.innerHTML =
-    '<div style="position:relative;border-radius:22px;overflow:hidden;margin:-16px -16px 0;background:#000;min-height:340px;">'
+    '<div style="position:relative;border-radius:0;overflow:hidden;background:#000;min-height:320px;">'
+    + '<div style="position:absolute;top:10px;left:10px;z-index:10;"><button onclick="closeModal(\"profileModal\")" style="width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button></div>'
 
     // Full-bleed background (banner image or gradient)
     + '<div onclick="editBanner()" title="Change banner" style="position:absolute;inset:0;background:' + bannerBg + ';cursor:pointer;transition:opacity 0.2s;"></div>'
@@ -4687,7 +4685,7 @@ function renderProfileModal() {
     + '</div>'
 
     // Bottom text content — sits on top of gradient
-    + '<div style="position:relative;z-index:3;padding:0 20px 20px;margin-top:200px;">'
+    + '<div style="position:relative;z-index:3;padding:0 20px 20px;margin-top:180px;">'
 
       // Name + handle row with action buttons
       + '<div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:8px;">'
@@ -4735,7 +4733,7 @@ function renderProfileModal() {
     + '</div>'  // outer card
 
     // ── Recent posts ──
-    + '<div style="padding:16px 4px 0;">'
+    + '<div style="padding:16px 16px 20px;">'
       + '<div style="font-family:Space Mono,monospace;font-size:9px;color:var(--text3);letter-spacing:1.5px;margin-bottom:10px;">RECENT POSTS</div>'
       + (posts.length
         ? posts.slice(-3).reverse().map(p =>
@@ -9792,6 +9790,9 @@ function onLiveDataUpdate(){
   try { updateTickerFromLive(); } catch(e) {}
   try { renderTrending(liveStocks); } catch(e) {}
   try { renderSidebarMmi(); } catch(e) {}
+  // updateHeroFromLiveStocks is instant (no network) — safe to call on every data update
+  // This is what keeps mobile hero prices live (they read from liveStocks populated by staggered fetches)
+  try { if(typeof updateHeroFromLiveStocks==='function') updateHeroFromLiveStocks(); } catch(e) {}
   try { if(typeof updateHeroPrices==='function') updateHeroPrices(); } catch(e) {}
   const active = window._activePage;
   try {
@@ -10436,9 +10437,11 @@ const NEWS_SOURCES = {
     'https://news.google.com/rss/search?q=bitcoin+ethereum+crypto+india+today&hl=en-IN&gl=IN&ceid=IN:en',
   ],
   commodities: [
+    // Google News first — most reliable through CORS proxies
+    'https://news.google.com/rss/search?q=gold+crude+oil+commodities+MCX+india+today&hl=en-IN&gl=IN&ceid=IN:en',
+    'https://news.google.com/rss/search?q=gold+price+silver+crude+oil+commodity+market+india&hl=en-IN&gl=IN&ceid=IN:en',
     'https://economictimes.indiatimes.com/markets/commodities/rssfeeds/1368154900.cms',
     'https://www.livemint.com/rss/commodities',
-    'https://news.google.com/rss/search?q=gold+price+crude+oil+india+mcx+today&hl=en-IN&gl=IN&ceid=IN:en',
   ],
 };
 
@@ -10541,7 +10544,7 @@ async function _tryFeed(feedUrl, limit) {
       // allorigins wraps in JSON
       let raw = text;
       try { const j = JSON.parse(text); if (j.contents) raw = j.contents; } catch(e) {}
-      if (!raw.includes('<item>')) continue;
+      if (!raw.includes('<item>') && !raw.includes('<entry>')) continue;
       const items = _parseRSSText(raw, limit).map(i => ({
         ...i, source: i.source || srcName
       }));
@@ -10587,8 +10590,8 @@ async function loadNews(cat, btn) {
   const container = document.getElementById('newsContainer');
   if(!container) return;
 
-  // Serve from cache if fresh
-  if(_newsLoaded[cat] && Date.now()-_newsLoaded[cat].ts < NEWS_CACHE_TTL){ renderNews(_newsLoaded[cat].items); return; }
+  // Serve from cache if fresh (only if it has actual items)
+  if(_newsLoaded[cat] && _newsLoaded[cat].items && _newsLoaded[cat].items.length && Date.now()-_newsLoaded[cat].ts < NEWS_CACHE_TTL){ renderNews(_newsLoaded[cat].items); return; }
 
   // Show skeleton immediately — never a blank screen
   _renderNewsSkeleton(container, 8);
@@ -12378,10 +12381,12 @@ function renderHeatmap() {
   }
 
   async function updateHeroPrices() {
-    // Always try live stocks first (fast, no network)
-    updateHeroFromLiveStocks();
-    // Always also re-fetch from Yahoo Finance so prices never go stale
-    // (updateHeroFromLiveStocks only reads _liveIndices which may be old)
+    // Step 1: Always render from liveStocks/_liveIndices immediately (no network, instant)
+    const gotAll = updateHeroFromLiveStocks();
+    // Step 2: Only do network fetch if liveStocks doesn't have the data yet
+    // This ensures mobile (where proxies are slow) still shows live prices
+    // from the shared yfBatchFetch that already ran in the staggered init
+    if (gotAll) return; // already have fresh data, skip network call
     for (const s of HERO_SYMBOLS) {
       const el = document.getElementById(s.id);
       if (!el) continue;
