@@ -791,6 +791,16 @@ header {
   .post-card { padding:10px; }
   .logo { font-size:18px; letter-spacing:2px; }
   #chartIntervals { display:none; }
+
+  /* Profile modal — full width bottom sheet on small screens */
+  #profileModal { align-items:flex-end !important; }
+  .profile-modal-box {
+    width:100% !important;
+    max-width:100% !important;
+    border-radius:20px 20px 0 0 !important;
+    max-height:92vh !important;
+  }
+  #profileBody { max-height:92vh !important; border-radius:20px 20px 0 0 !important; }
 }
 
 /* Header mobile search icon */
@@ -850,6 +860,8 @@ header {
   .compose-box   { display: block !important; }
   /* Never show mobile compose modal on desktop */
   #mobileComposeModal { display: none !important; }
+  /* Profile modal — centered fixed width on desktop */
+  .profile-modal-box { width:480px; max-width:95vw; }
 }
 </style>
 <body>
@@ -2239,7 +2251,7 @@ window.submitMobilePost = function() {
 
 <!-- PROFILE MODAL -->
 <div class="modal-overlay" id="profileModal" onclick="if(event.target===this)closeModal('profileModal')">
-  <div class="modal" style="width:480px;padding:0;overflow:hidden;" onclick="event.stopPropagation()">
+  <div class="modal profile-modal-box" style="padding:0;overflow:hidden;" onclick="event.stopPropagation()">
     <span id="profileModalTitle" style="display:none;"></span>
     <div id="profileBody" style="overflow-y:auto;max-height:88vh;border-radius:16px;"></div>
   </div>
