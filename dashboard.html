@@ -10442,8 +10442,8 @@ function _mpInit() {
   setTimeout(() => { _fetchCommoditiesLive().catch(()=>{}); }, 3500);
   // Tier 5 (5000ms): full bootstrap — heavy, runs after UI is fully responsive
   setTimeout(() => { _fastBootstrapStocks(); }, 5000);
-  // Tier 5.5 (6000ms): MMI data — fetch real Tickertape score for sidebar gauge
-  setTimeout(() => { _fetchMmiData().then(() => { try { renderSidebarMmi(); } catch(e){} }).catch(()=>{}); }, 6000);
+  // Tier 5.5 (3000ms): MMI data — fetch real VIX + indices score for sidebar gauge
+  setTimeout(() => { _fetchMmiData().then(() => { try { renderSidebarMmi(); } catch(e){} }).catch(()=>{}); }, 3000);
 
   // ── STEP 3: Safety re-renders — update sidebar as data arrives ──
   setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); }, 2000);
@@ -10457,16 +10457,20 @@ function _mpInit() {
   }, 9000);
 }
 
-// Fetch Nifty/BankNifty/Sensex directly from Yahoo Finance (no backend needed)
+// Fetch Nifty/BankNifty/Sensex/VIX directly from Yahoo Finance (no backend needed)
 async function _fetchIndicesVercel() {
   try {
-    const idxSyms = ['^NSEI', '^NSEBANK', '^BSESN'];
+    const idxSyms = ['^NSEI', '^NSEBANK', '^BSESN', '^INDIAVIX'];
     const map = await yfBatchFetch(idxSyms);
     if (!window._liveIndices) window._liveIndices = {};
     const mk = (price, chg, up) => ({ price, chg: (chg>=0?'+':'')+chg.toFixed(2)+'%', up });
-    const n = map.get('^NSEI');    if (n) { const o=mk(n.price,n.chg,n.up); window._liveIndices['NIFTY 50']=o;   window._liveIndices['NIFTY']=o; }
-    const b = map.get('^NSEBANK'); if (b) { const o=mk(b.price,b.chg,b.up); window._liveIndices['NIFTY BANK']=o; window._liveIndices['BANKNIFTY']=o; }
-    const s = map.get('^BSESN');   if (s) { const o=mk(s.price,s.chg,s.up); window._liveIndices['SENSEX']=o; }
+    const n = map.get('^NSEI');      if (n) { const o=mk(n.price,n.chg,n.up); window._liveIndices['NIFTY 50']=o;   window._liveIndices['NIFTY']=o; }
+    const b = map.get('^NSEBANK');   if (b) { const o=mk(b.price,b.chg,b.up); window._liveIndices['NIFTY BANK']=o; window._liveIndices['BANKNIFTY']=o; }
+    const s = map.get('^BSESN');     if (s) { const o=mk(s.price,s.chg,s.up); window._liveIndices['SENSEX']=o; }
+    const v = map.get('^INDIAVIX');  if (v) { const o=mk(v.price,v.chg,v.up); window._liveIndices['INDIA VIX']=o; window._liveIndices['INDIAVIX']=o;
+      // Also patch _mmiData so the gauge uses fresh VIX immediately
+      if (window._mmiData) window._mmiData.vix = { price: v.price, chg: v.chg };
+    }
     if (typeof updateHeroFromLiveStocks === 'function') updateHeroFromLiveStocks();
     // ── Refresh MMI gauge whenever fresh index data arrives ──
     try { renderSidebarMmi(); } catch(e) {}
@@ -10624,25 +10628,46 @@ function renderSidebarMmi() {
     score = result.score; zone = result.zone; zoneCol = result.zoneCol;
     emoji = result.emoji; signals = result.signals; ttSource = result.ttSource;
   } else {
-    // Pre-fetch fallback: estimate from live indices only
+    // Pre-fetch fallback: estimate from live indices + VIX
     const idx   = window._liveIndices || {};
     const nifty = idx['NIFTY 50'] || idx['NIFTY'];
     const bank  = idx['NIFTY BANK'] || idx['BANKNIFTY'];
+    const _pf   = s => { const v = parseFloat(s); return isNaN(v) ? null : v; };
+    const nChg  = nifty ? _pf(nifty.chg) : null;
+    const bChg  = bank  ? _pf(bank.chg)  : null;
+
     score = 50; signals = [];
-    if (nifty?.chg != null) {
-      const c = parseFloat(nifty.chg);
-      if      (c >  2.0) { score += 20; signals.push({ label:'Nifty 50', val:(c>=0?'+':'')+c.toFixed(2)+'%', col:'#00c853' }); }
-      else if (c >  0.5) { score += 10; signals.push({ label:'Nifty 50', val:(c>=0?'+':'')+c.toFixed(2)+'%', col:'#69f0ae' }); }
-      else if (c > -0.5) {              signals.push({ label:'Nifty 50', val:c.toFixed(2)+'%',                col:'#ffd740' }); }
-      else if (c > -2.0) { score -= 10; signals.push({ label:'Nifty 50', val:c.toFixed(2)+'%',               col:'#ff6d00' }); }
-      else               { score -= 20; signals.push({ label:'Nifty 50', val:c.toFixed(2)+'%',               col:'#ff3b3b' }); }
+
+    // VIX from any available source
+    const vixLive = idx['INDIA VIX'] || idx['INDIAVIX'];
+    const vixVal  = vixLive ? _pf(vixLive.price ?? vixLive.chg) : null;
+    if (vixVal != null && vixVal > 5 && vixVal < 60) {
+      let col, mood;
+      if      (vixVal < 11) { score += 25; col='#00c853'; mood='Very Low VIX'; }
+      else if (vixVal < 14) { score += 15; col='#69f0ae'; mood='Low VIX'; }
+      else if (vixVal < 18) { col='#ffd740'; mood='Moderate VIX'; }
+      else if (vixVal < 22) { score -= 15; col='#ff6d00'; mood='Elevated VIX'; }
+      else if (vixVal < 26) { score -= 25; col='#ff4500'; mood='High VIX'; }
+      else                  { score -= 35; col='#d50000'; mood='Panic VIX'; }
+      signals.push({ label:'India VIX', val:vixVal.toFixed(1), col, mood });
     }
-    if (bank?.chg != null && nifty?.chg != null) {
-      const bc = parseFloat(bank.chg), nc = parseFloat(nifty.chg);
-      const spread = bc - nc;
-      if      (spread >  0.5) { score += 7;  signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', col:'#69f0ae' }); }
-      else if (spread < -0.5) { score -= 7;  signals.push({ label:'Bank Nifty', val:bc.toFixed(2)+'%',                col:'#ff6d00' }); }
-      else                    {              signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', col:'#ffd740' }); }
+
+    if (nChg != null) {
+      let col, mood;
+      if      (nChg >  2.0) { score += 20; col='#00c853'; mood='Strong Rally'; }
+      else if (nChg >  0.5) { score += 10; col='#69f0ae'; mood='Bullish'; }
+      else if (nChg > -0.5) { col='#ffd740'; mood='Flat/Neutral'; }
+      else if (nChg > -2.0) { score -= 10; col='#ff6d00'; mood='Bearish'; }
+      else                  { score -= 20; col='#ff3b3b'; mood='Sharp Sell-off'; }
+      signals.push({ label:'Nifty 50', val:(nChg>=0?'+':'')+nChg.toFixed(2)+'%', col, mood });
+    }
+    if (bChg != null && nChg != null) {
+      const spread = bChg - nChg;
+      let col, mood;
+      if      (spread >  1.0) { score += 7; col='#69f0ae'; mood='Banks Leading'; }
+      else if (spread < -1.0) { score -= 7; col='#ff6d00'; mood='Banks Lagging'; }
+      else                    { col='#ffd740'; mood='In Line'; }
+      signals.push({ label:'Bank Nifty', val:(bChg>=0?'+':'')+bChg.toFixed(2)+'%', col, mood });
     }
     score = Math.max(0, Math.min(100, score));
     if      (score >= 75) { zone='Extreme Greed'; zoneCol='#00c853'; emoji='🤑'; }
@@ -10715,21 +10740,31 @@ async function _fetchMmiData() {
     'https://api.tickertape.in/market-mood-index/3m',
     'https://api.tickertape.in/market-mood-index/1m',
   ];
+  // Extended proxy list — includes newer reliable CORS proxies
   const _TT_PROXIES = [
     u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
     u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
     u => `https://thingproxy.freeboard.io/fetch/${u}`,
+    u => `https://cors-anywhere.herokuapp.com/${u}`,
+    u => `https://proxy.cors.sh/${u}`,
   ];
   outer:
   for (const ttUrl of _TT_URLS) {
     for (const proxyFn of _TT_PROXIES) {
       try {
-        const r = await fetch(proxyFn(ttUrl), { signal: AbortSignal.timeout(8000) });
+        const r = await fetch(proxyFn(ttUrl), { signal: AbortSignal.timeout(7000) });
         if (!r.ok) continue;
         const raw = await r.json();
-        const parsed = (raw && raw.contents) ? JSON.parse(raw.contents) : raw;
-        const arr = parsed && (parsed.data || parsed.mmiData);
+        const parsed = (raw && raw.contents) ? (() => { try { return JSON.parse(raw.contents); } catch(e) { return null; } })() : raw;
+        if (!parsed) continue;
+        // Handle both flat {mmi: 42} and array responses
+        if (typeof parsed.mmi === 'number') {
+          ttScore = Math.round(Math.max(0, Math.min(100, parsed.mmi)));
+          ttZone = parsed.classification || parsed.zone || null;
+          ttSource = true; ttSourceLabel = '✓ Tickertape'; break outer;
+        }
+        const arr = parsed.data || parsed.mmiData || parsed.result;
         if (arr && arr.length) {
           const latest = arr[arr.length - 1];
           const v = typeof latest.value === 'number' ? latest.value
@@ -11002,12 +11037,38 @@ function _calcMoodScore(data) {
 
   // ── Compute final score ──────────────────────────────────────────
   let score;
-  if (totalWeight >= 50) {
+  if (totalWeight >= 30) {
     score = Math.round(Math.max(0, Math.min(100, weightedScore / totalWeight)));
   } else {
-    // Not enough data — basic fallback
+    // Not enough weighted data — build score from whatever live data we have
+    const idx = window._liveIndices || {};
+    const _pf = s => { const v = parseFloat(s); return isNaN(v) ? null : v; };
+    const nLive = idx['NIFTY 50'] || idx['NIFTY'];
+    const bLive = idx['NIFTY BANK'] || idx['BANKNIFTY'];
+    const nChg  = data.nifty?.chg ?? (nLive ? _pf(nLive.chg) : null);
+    const bChg  = data.bank?.chg  ?? (bLive ? _pf(bLive.chg) : null);
+    const vix   = data.vix?.price;
     score = 50;
-    if (data.nifty?.chg != null) score += Math.max(-20, Math.min(20, data.nifty.chg * 8));
+    if (vix != null) {
+      if      (vix < 11) score += 25;
+      else if (vix < 14) score += 15;
+      else if (vix < 18) score += 0;
+      else if (vix < 22) score -= 15;
+      else if (vix < 26) score -= 25;
+      else               score -= 35;
+    }
+    if (nChg != null) {
+      if      (nChg >  2.0) score += 20;
+      else if (nChg >  0.5) score += 10;
+      else if (nChg > -0.5) score += 0;
+      else if (nChg > -2.0) score -= 10;
+      else                  score -= 20;
+    }
+    if (bChg != null && nChg != null) {
+      const sp = bChg - nChg;
+      if      (sp >  1.0) score += 7;
+      else if (sp < -1.0) score -= 7;
+    }
     score = Math.round(Math.max(0, Math.min(100, score)));
   }
 
@@ -11156,14 +11217,34 @@ function _renderMmiHtml(el, data) {
   el.innerHTML = html;
 }
 
-// Auto-refresh MMI every 5 minutes — updates both the MMI page and sidebar gauge
+// ── Auto-refresh MMI every 90 seconds — live & accurate ──────────
+// Step 1: Every 30s — re-render using latest _liveIndices (no extra network call)
 setInterval(() => {
-  _mmiData = null;
+  // Always re-render sidebar from latest live data
+  // If we have _mmiData, patch in freshest index values before rendering
+  if (_mmiData && window._liveIndices) {
+    const idx = window._liveIndices;
+    const _pf = s => { const v = parseFloat(s); return isNaN(v) ? null : v; };
+    const nLive = idx['NIFTY 50'] || idx['NIFTY'];
+    const bLive = idx['NIFTY BANK'] || idx['BANKNIFTY'];
+    if (nLive && nLive.price) {
+      _mmiData.nifty = { price: nLive.price, chg: _pf(nLive.chg) };
+    }
+    if (bLive && bLive.price) {
+      _mmiData.bank  = { price: bLive.price, chg: _pf(bLive.chg) };
+    }
+  }
+  try { renderSidebarMmi(); } catch(e) {}
+  if (window._activePage === 'mmi') { try { if(_mmiData) _renderMmiHtml(document.getElementById('mmiBody'), _mmiData); } catch(e) {} }
+}, 30 * 1000);
+
+// Step 2: Every 2 minutes — full refetch (VIX + chart data + Tickertape attempt)
+setInterval(() => {
   _fetchMmiData().then(() => {
     try { renderSidebarMmi(); } catch(e) {}
     if (window._activePage === 'mmi') { try { renderMmi(); } catch(e) {} }
   }).catch(() => {});
-}, 5 * 60 * 1000);
+}, 2 * 60 * 1000);
 
 function renderUnlisted() {
   const el = document.getElementById('unlistedBody');
