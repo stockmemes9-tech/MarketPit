@@ -2799,14 +2799,18 @@ async function _yfBatchFetchInner(yfSyms) {
     return count;
   }
 
-  // Try direct v7 (both query1 and query2)
+  // ── Attempt 1: direct v7 on query1 and query2 ──
   for (const base of ['query1','query2']) {
     try {
-      const r = await fetch(`https://${base}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symsStr)}&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent`, { signal: AbortSignal.timeout(7000) });
+      const r = await fetch(
+        `https://${base}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symsStr)}&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent`,
+        { signal: AbortSignal.timeout(7000) }
+      );
       if (r.ok && _parseV7(await r.text()) > 0) return result;
     } catch(e) {}
   }
-  // Proxy the v7 URL
+
+  // ── Attempt 2: proxy v7 through each CORS proxy ──
   for (const proxyFn of _PROXY_WRAP) {
     try {
       const r = await fetch(proxyFn(v7url), { signal: AbortSignal.timeout(10000) });
@@ -2814,26 +2818,50 @@ async function _yfBatchFetchInner(yfSyms) {
       if (_parseV7(await r.text()) > 0) return result;
     } catch(e) { continue; }
   }
-  // Last resort: one-by-one chart fetches
-  await Promise.allSettled(yfSyms.map(async sym => {
+
+  // ── Attempt 3: try v8 chart for each symbol in parallel (no crumb needed for chart) ──
+  // Used when v7 is rate-limited — v8 chart endpoint is more permissive
+  if (yfSyms.length <= 10) {
+    await Promise.allSettled(yfSyms.map(async sym => {
+      if (result.has(sym)) return;
+      try { const res = await yfFetch(sym); if (res) result.set(sym, res); } catch(e) {}
+    }));
+    if (result.size > 0) return result;
+  }
+
+  // ── Attempt 4: last resort — one-by-one for any still missing ──
+  await Promise.allSettled(yfSyms.filter(s => !result.has(s)).map(async sym => {
     try { const res = await yfFetch(sym); if (res) result.set(sym, res); } catch(e) {}
   }));
   return result;
 }
 
-// Fetch crypto prices from CoinGecko (free, no key, very reliable)
+// Fetch crypto prices from CoinGecko with full CORS proxy fallback
 let _cgCache = null;
 let _cgCacheTime = 0;
 async function cgFetchAll() {
-  if (_cgCache && Date.now() - _cgCacheTime < 25000) return _cgCache; // 25s TTL — fresh on every 30s tick
+  if (_cgCache && Date.now() - _cgCacheTime < 25000) return _cgCache; // 25s TTL
   const ids = Object.values(CG_IDS).join(',');
   const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
-  const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
-  if (!r.ok) throw new Error('CoinGecko error');
-  const data = await r.json();
-  _cgCache = data;
-  _cgCacheTime = Date.now();
-  return data;
+  function _parseCG(raw) {
+    try {
+      let p; try { const w=JSON.parse(raw); p=w.contents?JSON.parse(w.contents):w; } catch(e){ p=JSON.parse(raw); }
+      if (p && typeof p==='object' && !p.status && Object.keys(p).length > 0) { _cgCache=p; _cgCacheTime=Date.now(); return p; }
+    } catch(e) {} return null;
+  }
+  // Try direct first
+  try { const r=await fetch(url,{signal:AbortSignal.timeout(8000)}); if(r.ok){const d=_parseCG(await r.text());if(d)return d;} } catch(e){}
+  // Proxy fallback chain
+  const proxies=[
+    u=>`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    u=>`https://corsproxy.io/?${encodeURIComponent(u)}`,
+    u=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+    u=>`https://thingproxy.freeboard.io/fetch/${u}`,
+  ];
+  for (const px of proxies) {
+    try { const r=await fetch(px(url),{signal:AbortSignal.timeout(10000)}); if(!r.ok)continue; const d=_parseCG(await r.text()); if(d)return d; } catch(e){}
+  }
+  throw new Error('CoinGecko all sources failed');
 }
 
 // Fetch a single crypto price
@@ -3141,22 +3169,7 @@ async function _fetchYFDirectInner() {
   }
 
   // ── 3. Fetch ALL commodity prices via yfBatchFetch ──
-  const commodities = [
-    {sym:'GOLD',yf:'GC=F'},{sym:'SILVER',yf:'SI=F'},{sym:'CRUDE',yf:'CL=F'},
-    {sym:'BRENT',yf:'BZ=F'},{sym:'NATURALGAS',yf:'NG=F'},{sym:'COPPER',yf:'HG=F'},
-    {sym:'PLATINUM',yf:'PL=F'},{sym:'WHEAT',yf:'ZW=F'},{sym:'CORN',yf:'ZC=F'},
-  ];
-  try {
-    const commMap = await yfBatchFetch(commodities.map(c => c.yf));
-    commMap.forEach((data, yfSym) => {
-      const item = commodities.find(c => c.yf === yfSym);
-      if (!item) return;
-      const chgStr = (data.chg >= 0 ? '+' : '') + data.chg.toFixed(2) + '%';
-      const existing = liveStocks.find(s => s.sym === item.sym);
-      if (existing) { existing.price = data.price; existing.chg = chgStr; existing.up = data.up; }
-      else { const se = STATIC_COMMODITIES.find(s=>s.sym===item.sym); liveStocks.push({...(se||{sym:item.sym,name:item.sym,currency:'$'}),price:data.price,chg:chgStr,up:data.up}); }
-    });
-  } catch(e) {}
+  try { await _fetchCommoditiesLive(); } catch(e) {}
 
   const total = stocksUpdated + cryptoUpdated;
   if (total > 0) {
@@ -3173,6 +3186,26 @@ async function _fetchYFDirectInner() {
     showApiBanner('static');
   }
   _yfFetching = false;
+}
+
+// ── Standalone commodity fetch — called from bootstrap and 30s refresh ──
+const _COMMODITIES = [
+  {sym:'GOLD',      yf:'GC=F'}, {sym:'SILVER',     yf:'SI=F'}, {sym:'CRUDE',      yf:'CL=F'},
+  {sym:'BRENT',     yf:'BZ=F'}, {sym:'NATURALGAS',  yf:'NG=F'}, {sym:'COPPER',     yf:'HG=F'},
+  {sym:'PLATINUM',  yf:'PL=F'}, {sym:'WHEAT',       yf:'ZW=F'}, {sym:'CORN',       yf:'ZC=F'},
+];
+async function _fetchCommoditiesLive() {
+  const map = await yfBatchFetch(_COMMODITIES.map(c => c.yf));
+  let updated = 0;
+  map.forEach((data, yfSym) => {
+    const item = _COMMODITIES.find(c => c.yf === yfSym);
+    if (!item) return;
+    const chgStr = (data.chg >= 0 ? '+' : '') + data.chg.toFixed(2) + '%';
+    const existing = liveStocks.find(s => s.sym === item.sym);
+    if (existing) { existing.price = data.price; existing.chg = chgStr; existing.up = data.up; existing._live = true; updated++; }
+    else { const se = STATIC_COMMODITIES.find(s => s.sym === item.sym); liveStocks.push({...(se||{sym:item.sym,name:item.sym,currency:'$'}),price:data.price,chg:chgStr,up:data.up,_live:true}); updated++; }
+  });
+  if (updated > 0) { onLiveDataUpdate(); updateTickerFromLive(); }
 }
 
 // Helper to update the live status text in header
@@ -5894,12 +5927,12 @@ function renderSettings(page) {
         <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:'Space Mono',monospace;">v1.0.0</div>
       </div>
       ${[
-        ['📋','Terms of Service','Community rules and usage','renderSettings("terms")'],
-        ['🔒','Privacy Policy','How your data is used','renderSettings("privacy_policy")'],
-        ['🐛','Report a Bug','Help improve MarketPit','window.location.href="mailto:marketxpit@gmail.com?subject=Bug%20Report%20%E2%80%94%20MarketPit&body=Describe%20the%20bug%3A%0A%0ASteps%20to%20reproduce%3A%0A%0ADevice%20%2F%20Browser%3A%0A"'],
-        ['💡','Suggest a Feature','Share your ideas','window.location.href="mailto:marketxpit@gmail.com?subject=Feature%20Suggestion%20%E2%80%94%20MarketPit&body=Describe%20your%20feature%20idea%3A%0A%0AWhy%20would%20it%20be%20useful%3A%0A"'],
-      ].map(([icon,label,desc,action]) => `
-        <div onclick="${action}" style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);cursor:pointer;">
+        ['📋','Terms of Service','Community rules and usage'],
+        ['🔒','Privacy Policy','How your data is used'],
+        ['🐛','Report a Bug','Help improve MarketPit'],
+        ['💡','Suggest a Feature','Share your ideas'],
+      ].map(([icon,label,desc]) => `
+        <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);">
           <span style="font-size:18px;">${icon}</span>
           <div style="flex:1;">
             <div style="font-weight:600;font-size:14px;color:var(--text);">${label}</div>
@@ -5907,86 +5940,6 @@ function renderSettings(page) {
           </div>
           <span style="color:var(--text3);">›</span>
         </div>`).join('')}`;
-
-  } else if (page === 'terms') {
-    title.textContent = 'TERMS OF SERVICE';
-    el.innerHTML = `
-      <button onclick="renderSettings('about')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
-      <div style="font-size:13px;color:var(--text2);line-height:1.7;">
-        <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:12px;">Terms of Service</div>
-        <div style="font-size:10px;color:var(--text3);font-family:'Space Mono',monospace;margin-bottom:18px;">Last updated: April 2026</div>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">1. Acceptance of Terms</div>
-        <p style="margin-bottom:14px;">By accessing or using MarketPit, you agree to be bound by these Terms of Service. If you do not agree, please do not use the platform.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">2. Use of the Platform</div>
-        <p style="margin-bottom:14px;">MarketPit is a community platform for discussing Indian financial markets. All content is for informational purposes only and does not constitute financial advice. You must be 18 years or older to use this platform.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">3. Community Rules</div>
-        <p style="margin-bottom:8px;">You agree not to:</p>
-        <ul style="margin-left:16px;margin-bottom:14px;">
-          <li style="margin-bottom:4px;">Post false, misleading, or manipulative information about securities</li>
-          <li style="margin-bottom:4px;">Harass, abuse, or threaten other community members</li>
-          <li style="margin-bottom:4px;">Share content that is illegal, defamatory, or violates others' rights</li>
-          <li style="margin-bottom:4px;">Use the platform for spam, solicitation, or commercial promotion without permission</li>
-        </ul>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">4. Paper Trading & Predictions</div>
-        <p style="margin-bottom:14px;">All trades and predictions on MarketPit are simulated using paper (virtual) money. No real money is involved. Results do not guarantee future performance.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">5. Data & Market Information</div>
-        <p style="margin-bottom:14px;">Market data is sourced from third-party providers and may be delayed. MarketPit makes no warranty as to accuracy, completeness, or timeliness of data.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">6. Disclaimer</div>
-        <p style="margin-bottom:14px;">MarketPit is not a SEBI-registered investment adviser. Nothing on this platform should be construed as investment advice. Always consult a qualified financial adviser before making investment decisions.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">7. Changes to Terms</div>
-        <p style="margin-bottom:14px;">We may update these terms at any time. Continued use of the platform after changes constitutes acceptance of the new terms.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">8. Contact</div>
-        <p style="margin-bottom:4px;">For any questions regarding these terms, contact us at:</p>
-        <a href="mailto:marketxpit@gmail.com" style="color:var(--accent);font-weight:600;text-decoration:none;">marketxpit@gmail.com</a>
-      </div>`;
-
-  } else if (page === 'privacy_policy') {
-    title.textContent = 'PRIVACY POLICY';
-    el.innerHTML = `
-      <button onclick="renderSettings('about')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
-      <div style="font-size:13px;color:var(--text2);line-height:1.7;">
-        <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:12px;">Privacy Policy</div>
-        <div style="font-size:10px;color:var(--text3);font-family:'Space Mono',monospace;margin-bottom:18px;">Last updated: April 2026</div>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">1. Information We Collect</div>
-        <p style="margin-bottom:8px;">MarketPit stores the following data locally on your device only:</p>
-        <ul style="margin-left:16px;margin-bottom:14px;">
-          <li style="margin-bottom:4px;">Username and display preferences you set</li>
-          <li style="margin-bottom:4px;">Posts and watchlist items you create</li>
-          <li style="margin-bottom:4px;">App settings (theme, font size, notifications)</li>
-          <li style="margin-bottom:4px;">Paper trade and prediction history</li>
-        </ul>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">2. How Your Data is Stored</div>
-        <p style="margin-bottom:14px;">All data is stored in your browser's local storage. MarketPit does not operate servers that collect or store your personal information. Your data never leaves your device unless you explicitly share it.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">3. Third-Party Data Sources</div>
-        <p style="margin-bottom:14px;">Market prices and financial data are fetched from third-party APIs (Yahoo Finance, Tickertape, etc.). When your browser requests this data, standard HTTP metadata such as your IP address may be visible to those providers under their own privacy policies.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">4. Cookies & Tracking</div>
-        <p style="margin-bottom:14px;">MarketPit does not use tracking cookies, analytics scripts, or advertising trackers. No data is sold or shared with advertisers.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">5. Data Deletion</div>
-        <p style="margin-bottom:14px;">You can delete all locally stored data at any time via Settings → Storage → Clear All Data. This permanently removes all your posts, watchlists, and preferences from the device.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">6. Children's Privacy</div>
-        <p style="margin-bottom:14px;">MarketPit is not intended for users under 18 years of age. We do not knowingly collect information from minors.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">7. Changes to This Policy</div>
-        <p style="margin-bottom:14px;">We may update this Privacy Policy from time to time. We encourage you to review it periodically.</p>
-
-        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">8. Contact</div>
-        <p style="margin-bottom:4px;">For privacy-related questions or requests, contact us at:</p>
-        <a href="mailto:marketxpit@gmail.com" style="color:var(--accent);font-weight:600;text-decoration:none;">marketxpit@gmail.com</a>
-      </div>`;
   }
 }
 
@@ -6112,7 +6065,7 @@ function _switchTabSilent(btn, page) {
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   const ALL_PAGES = ['feed','pits','messages','screener','news','trending','watchlist',
-    'paper','ipo','heatmap','earnings','alerts','fii','rooms','unlisted','predict',
+    'paper','ipo','heatmap','earnings','alerts','fii','rooms','unlisted','predict','mmi',
     'compare','econocal','mf','optpnl','tv'];
   ALL_PAGES.forEach(p => {
     const el = document.getElementById('page-' + p);
@@ -6137,6 +6090,7 @@ function _switchTabSilent(btn, page) {
   if (page==='tv')        renderTVPage();
   if (page==='unlisted')  renderUnlisted();
   if (page==='predict')   renderPredict();
+  if (page==='mmi')       renderMmi();
 }
 
 function _switchScreenerTabSilent(tab) {
@@ -6172,7 +6126,7 @@ function switchTabMobile(btn, page) {
   document.querySelectorAll('.bn-item').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   const ALL_PAGES = ['feed','pits','messages','screener','news','trending','watchlist',
-    'paper','ipo','heatmap','earnings','alerts','fii','rooms','unlisted','predict',
+    'paper','ipo','heatmap','earnings','alerts','fii','rooms','unlisted','predict','mmi',
     'compare','econocal','mf','optpnl','tv'];
   ALL_PAGES.forEach(p => {
     const el = document.getElementById('page-' + p);
@@ -6198,6 +6152,7 @@ function switchTabMobile(btn, page) {
   if (page==='tv')        renderTVPage();
   if (page==='unlisted')  renderUnlisted();
   if (page==='predict')   renderPredict();
+  if (page==='mmi')       renderMmi();
   } catch(e) { console.warn('Tab render error:', e); }
 }
 
@@ -6207,7 +6162,7 @@ function switchTab(btn, page) {
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   const ALL_PAGES = ['feed','pits','messages','screener','news','trending','watchlist',
-    'paper','ipo','heatmap','earnings','alerts','fii','rooms','unlisted','predict',
+    'paper','ipo','heatmap','earnings','alerts','fii','rooms','unlisted','predict','mmi',
     'compare','econocal','mf','optpnl','tv'];
   ALL_PAGES.forEach(p => {
     const el = document.getElementById('page-' + p);
@@ -6241,6 +6196,7 @@ function switchTab(btn, page) {
   if (page==='tv')        renderTVPage();
   if (page==='unlisted')  renderUnlisted();
   if (page==='predict')   renderPredict();
+  if (page==='mmi')       renderMmi();
   } catch(e) { console.warn('Tab render error:', e); }
 }
 
@@ -9956,8 +9912,9 @@ function _mpInit() {
   setTimeout(() => { fetchPriorityStocks(); }, 800);
   // Tier 4 (2500ms): movers — medium batch, after UI is painted
   setTimeout(() => { _fetchAllMovers(); }, 2500);
+  // Tier 4.5 (3500ms): commodities — fast batch, shows live Gold/Crude early
+  setTimeout(() => { _fetchCommoditiesLive().catch(()=>{}); }, 3500);
   // Tier 5 (5000ms): full bootstrap — heavy, runs after UI is fully responsive
-  // fetchLiveData() removed — it duplicates fetchCryptoLive + _fastBootstrapStocks
   setTimeout(() => { _fastBootstrapStocks(); }, 5000);
 
   // ── STEP 3: Safety re-renders — update sidebar as data arrives ──
@@ -10022,12 +9979,15 @@ async function _fastBootstrapStocks() {
         });
         if (updated > 0) {
           _bootstrapDone = true;
+          window._hasLiveData = true;
           updateWhatsMoving();
           renderTrending(liveStocks);
           updateTickerFromLive();
           onLiveDataUpdate();
           const ts = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', hour12:true, timeZone:'Asia/Kolkata'});
           setLiveStatus('live', `● LIVE · ${ts} IST`);
+          // Also fetch commodities on first successful bootstrap
+          try { _fetchCommoditiesLive(); } catch(e) {}
         }
       } catch(e) {}
     }
@@ -10522,23 +10482,157 @@ function renderUnlisted() {
     + '<div style="padding:10px 16px;font-size:10px;color:var(--text3);text-align:center;">Derived Prices · Unlisted shares are not traded on NSE/BSE · As on 15 Mar 2026, 09:03</div>'
     + '</div>';
 }
+
+// ── PREDICTIONS ──────────────────────────────────────────────────
+const PREDICT_MARKETS = [
+  { id:'nifty_20k',   q:'Will Nifty 50 close above 24,000 by end of April 2026?',     cat:'index',     yes:62, no:38, vol:'\u20b94.2L', closes:'30 Apr 2026' },
+  { id:'rbi_cut',     q:'Will RBI cut repo rate in the June 2026 MPC meeting?',        cat:'macro',     yes:55, no:45, vol:'\u20b92.8L', closes:'06 Jun 2026' },
+  { id:'infy_q4',     q:'Will Infosys beat Q4 FY26 revenue estimates?',               cat:'stock',     yes:48, no:52, vol:'\u20b91.9L', closes:'17 Apr 2026' },
+  { id:'usdinr_85',   q:'Will USD/INR cross 85 before 30 June 2026?',                 cat:'forex',     yes:71, no:29, vol:'\u20b93.5L', closes:'30 Jun 2026' },
+  { id:'gold_80k',    q:'Will MCX Gold hit \u20b980,000 per 10g before May 2026?',   cat:'commodity', yes:44, no:56, vol:'\u20b91.1L', closes:'31 May 2026' },
+  { id:'sensex_80',   q:'Will Sensex recover above 80,000 by end of May 2026?',       cat:'index',     yes:58, no:42, vol:'\u20b95.0L', closes:'31 May 2026' },
+  { id:'tata_motors', q:'Will Tata Motors outperform Nifty Auto in April 2026?',      cat:'stock',     yes:51, no:49, vol:'\u20b90.9L', closes:'30 Apr 2026' },
+  { id:'oil_75',      q:'Will Brent Crude stay below $75 through April 2026?',        cat:'commodity', yes:39, no:61, vol:'\u20b92.2L', closes:'30 Apr 2026' },
+  { id:'bnk_54k',     q:'Will Bank Nifty hit 54,000 before June 2026?',               cat:'index',     yes:66, no:34, vol:'\u20b96.1L', closes:'30 Jun 2026' },
+  { id:'ipl_market',  q:'Will markets rally during IPL 2026 season (Apr-Jun)?',       cat:'macro',     yes:53, no:47, vol:'\u20b91.5L', closes:'01 Jun 2026' },
+];
+const PREDICT_RESOLVED = [
+  { id:'r_budget',    q:'Did Union Budget 2026 cut income tax for the middle class?', cat:'macro', yes:80, no:20, outcome:'YES', settled:'01 Feb 2026' },
+  { id:'r_nifty_jan', q:'Did Nifty 50 close positive in January 2026?',               cat:'index', yes:45, no:55, outcome:'NO',  settled:'31 Jan 2026' },
+  { id:'r_rbi_feb',   q:'Did RBI hold rates in February 2026 MPC?',                   cat:'macro', yes:70, no:30, outcome:'YES', settled:'07 Feb 2026' },
+];
+var _predictTab     = 'open';
+var _predictBets    = JSON.parse(localStorage.getItem('mp_predictBets') || '[]');
+var _predictBalance = parseFloat(localStorage.getItem('mp_predictBal')  || '10000');
+function _savePredictBets() {
+  localStorage.setItem('mp_predictBets', JSON.stringify(_predictBets));
+  localStorage.setItem('mp_predictBal',  String(_predictBalance));
+}
+function switchPredictTab(tab, btn) {
+  _predictTab = tab;
+  ['ptab_open','ptab_mybets','ptab_resolved'].forEach(function(id) {
+    var b = document.getElementById(id); if (!b) return;
+    b.style.borderBottom = '2px solid transparent'; b.style.color = 'var(--text3)'; b.style.fontWeight = '600';
+  });
+  if (btn) { btn.style.borderBottom = '2px solid var(--accent)'; btn.style.color = 'var(--accent)'; btn.style.fontWeight = '700'; }
+  renderPredict();
+}
+function renderPredict() {
+  var el = document.getElementById('predictBody');
+  var balEl = document.getElementById('predictBalance');
+  if (!el) return;
+  if (balEl) balEl.textContent = '\u20b9' + _predictBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  var catColor = { index:'#0070f3', macro:'#f5a623', stock:'#00a854', forex:'#7856ff', commodity:'#ff6b35' };
+  if (_predictTab === 'open') {
+    el.innerHTML = PREDICT_MARKETS.map(function(m) {
+      var col = catColor[m.cat] || '#888';
+      var existing = _predictBets.find(function(b) { return b.id === m.id && !b.resolved; });
+      return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">'
+        + '<div style="flex:1;"><span style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:' + col + ';background:' + col + '18;border-radius:6px;padding:2px 7px;">' + m.cat + '</span>'
+        + '<div style="font-size:14px;font-weight:700;color:var(--text);margin-top:8px;line-height:1.4;">' + m.q + '</div>'
+        + '<div style="font-size:11px;color:var(--text3);margin-top:4px;">Closes ' + m.closes + ' &nbsp;&middot;&nbsp; Vol ' + m.vol + '</div></div>'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap;">'
+        + '<div style="flex:1;background:var(--bg3);border-radius:8px;overflow:hidden;height:8px;min-width:80px;"><div style="width:' + m.yes + '%;height:100%;background:linear-gradient(90deg,#00a854,#00c566);border-radius:8px;"></div></div>'
+        + '<span style="font-size:11px;font-weight:700;color:#00a854;white-space:nowrap;">YES ' + m.yes + '%</span>'
+        + '<span style="font-size:11px;font-weight:700;color:var(--red);white-space:nowrap;">NO ' + m.no + '%</span></div>'
+        + (existing
+          ? '<div style="margin-top:12px;padding:9px 14px;background:rgba(0,112,243,0.08);border-radius:10px;border:1px solid var(--border2);font-size:12px;color:var(--accent);font-weight:600;">\u2705 Your bet: ' + existing.side + ' \u00b7 \u20b9' + existing.amount + '</div>'
+          : '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">'
+            + '<button onclick="_openPredictBet(\'' + m.id + '\',\'YES\')" style="flex:1;min-width:80px;padding:9px 0;background:#00a85415;border:1.5px solid #00a854;color:#00a854;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;">\u2705 YES</button>'
+            + '<button onclick="_openPredictBet(\'' + m.id + '\',\'NO\')"  style="flex:1;min-width:80px;padding:9px 0;background:#e5393515;border:1.5px solid var(--red);color:var(--red);border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;">\u274c NO</button>'
+            + '</div>')
+        + '</div>';
+    }).join('');
+  } else if (_predictTab === 'mybets') {
+    var open = _predictBets.filter(function(b) { return !b.resolved; });
+    if (!open.length) { el.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--text3);"><div style="font-size:40px;margin-bottom:12px;">\ud83c\udfaf</div><div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">No active bets yet</div><div style="font-size:13px;">Go to Open Markets and place your first prediction!</div></div>'; return; }
+    el.innerHTML = open.map(function(b) {
+      var mkt = PREDICT_MARKETS.find(function(m) { return m.id === b.id; }) || {};
+      var sc = b.side === 'YES' ? '#00a854' : 'var(--red)';
+      return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">'
+        + '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;">' + (mkt.q || b.id) + '</div>'
+        + '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;"><span>Side: <b style="color:' + sc + ';">' + b.side + '</b></span><span>Amount: <b style="color:var(--accent);">\u20b9' + b.amount + '</b></span><span style="color:var(--text3);">Placed: ' + b.date + '</span></div></div>';
+    }).join('');
+  } else if (_predictTab === 'resolved') {
+    el.innerHTML = PREDICT_RESOLVED.map(function(m) {
+      var userBet = _predictBets.find(function(b) { return b.id === m.id; });
+      var oc = m.outcome === 'YES' ? '#00a854' : 'var(--red)';
+      var won = userBet && userBet.side === m.outcome;
+      return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;"><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;background:' + oc + '20;color:' + oc + ';">RESOLVED: ' + m.outcome + '</span><span style="font-size:11px;color:var(--text3);">Settled ' + m.settled + '</span></div>'
+        + '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;">' + m.q + '</div>'
+        + '<div style="display:flex;gap:10px;font-size:12px;"><span>YES: <b style="color:#00a854;">' + m.yes + '%</b></span><span>NO: <b style="color:var(--red);">' + m.no + '%</b></span></div>'
+        + (userBet ? '<div style="margin-top:10px;padding:8px 12px;border-radius:10px;background:' + (won?'rgba(0,168,84,0.12)':'rgba(229,57,53,0.10)') + ';border:1px solid ' + (won?'#00a854':'var(--red)') + ';font-size:12px;font-weight:700;color:' + (won?'#00a854':'var(--red)') + ';">' + (won ? '\ud83c\udfc6 You won! +\u20b9' + Math.round(userBet.amount * 1.8) : '\ud83d\udcb8 You lost \u20b9' + userBet.amount) + '</div>' : '')
+        + '</div>';
+    }).join('');
+  }
+}
+window._openPredictBet = function(marketId, side) {
+  var mkt = PREDICT_MARKETS.find(function(m) { return m.id === marketId; }); if (!mkt) return;
+  var old = document.getElementById('_predictBetModal'); if (old) old.remove();
+  var isMob = window.innerWidth < 768;
+  var ov = document.createElement('div'); ov.id = '_predictBetModal';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:' + (isMob?'flex-end':'center') + ';justify-content:center;';
+  var box = document.createElement('div');
+  box.style.cssText = isMob ? 'background:var(--panel);border-radius:22px 22px 0 0;width:100%;padding:24px 20px 36px;' : 'background:var(--panel);border:1px solid var(--border2);border-radius:16px;width:420px;max-width:95vw;padding:24px;';
+  window._pbSide = side;
+  box.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><div style="font-family:\'Bebas Neue\',sans-serif;font-size:20px;letter-spacing:2px;color:var(--text);">PLACE BET</div><button onclick="document.getElementById(\'_predictBetModal\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text3);">\u2715</button></div>'
+    + '<div style="font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.5;">' + mkt.q + '</div>'
+    + '<div style="display:flex;gap:10px;margin-bottom:18px;">'
+    + '<div id="_pbY" onclick="window._pbSide=\'YES\';_pbHL()" style="flex:1;padding:11px 0;text-align:center;border-radius:10px;cursor:pointer;font-weight:700;font-size:14px;border:2px solid ' + (side==='YES'?'#00a854':'var(--border)') + ';background:' + (side==='YES'?'#00a85418':'transparent') + ';color:' + (side==='YES'?'#00a854':'var(--text3)') + ';">\u2705 YES</div>'
+    + '<div id="_pbN"  onclick="window._pbSide=\'NO\';_pbHL()"  style="flex:1;padding:11px 0;text-align:center;border-radius:10px;cursor:pointer;font-weight:700;font-size:14px;border:2px solid ' + (side==='NO'?'var(--red)':'var(--border)') + ';background:' + (side==='NO'?'#e5393518':'transparent') + ';color:' + (side==='NO'?'var(--red)':'var(--text3)') + ';">\u274c NO</div>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-bottom:6px;font-family:\'Space Mono\',monospace;">AMOUNT (Balance: \u20b9' + _predictBalance.toLocaleString('en-IN',{maximumFractionDigits:0}) + ')</div>'
+    + '<input id="_pbAmt" type="number" min="10" max="' + _predictBalance + '" value="100" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:15px;font-family:\'Space Mono\',monospace;outline:none;margin-bottom:8px;">'
+    + '<div style="display:flex;gap:6px;margin-bottom:18px;">' + [50,100,250,500].map(function(a){return '<button onclick="document.getElementById(\'_pbAmt\').value='+a+'" style="flex:1;padding:6px 0;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;cursor:pointer;">\u20b9'+a+'</button>';}).join('') + '</div>'
+    + '<button onclick="_confirmPB(\''+marketId+'\',this)" style="width:100%;padding:13px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:800;cursor:pointer;">CONFIRM BET</button>';
+  box.onclick = function(e){e.stopPropagation();};
+  ov.appendChild(box); document.body.appendChild(ov);
+  ov.onclick = function(){ov.remove();};
+};
+window._pbHL = function() {
+  var s=window._pbSide, y=document.getElementById('_pbY'), n=document.getElementById('_pbN');
+  if(y){y.style.border='2px solid '+(s==='YES'?'#00a854':'var(--border)');y.style.background=s==='YES'?'#00a85418':'transparent';y.style.color=s==='YES'?'#00a854':'var(--text3)';}
+  if(n){n.style.border='2px solid '+(s==='NO'?'var(--red)':'var(--border)');n.style.background=s==='NO'?'#e5393518':'transparent';n.style.color=s==='NO'?'var(--red)':'var(--text3)';}
+};
+window._confirmPB = function(marketId) {
+  var a=parseFloat((document.getElementById('_pbAmt')||{}).value||0);
+  if(!a||a<10){alert('Minimum bet is \u20b910');return;}
+  if(a>_predictBalance){alert('Insufficient balance');return;}
+  _predictBalance-=a;
+  var now=new Date(), ds=now.getDate()+'/'+(now.getMonth()+1)+'/'+now.getFullYear();
+  _predictBets.push({id:marketId,side:window._pbSide,amount:a,date:ds,resolved:false});
+  _savePredictBets();
+  var ov=document.getElementById('_predictBetModal'); if(ov)ov.remove();
+  renderPredict();
+};
+
 } else {
   _mpInit(); // DOM already ready
 }
 
-// ── SMART REFRESH STRATEGY ──────────────────────────────────────
-// Every 20s: Railway caches for 30s so 20s is optimal (avoids stale cache)
+// ── LIVE REFRESH STRATEGY ─────────────────────────────────────────
+// Stocks + commodities: full refresh every 30s
 setInterval(() => {
-  _bootstrapDone = false; // allow fresh batch fetch
-  fetchLiveData();
-  _fetchIndicesVercel(); // refresh indices every cycle too
-}, 20000);
-// Fast bootstrap: retry every 10s until Railway comes up (max 12 tries = 2 min)
+  _bootstrapDone = false;
+  fetchYFDirect();       // stocks + commodities via YF
+}, 30000);
+
+// Indices: every 60s (already has its own interval — keep in sync)
+// Crypto: every 30s
+setInterval(() => {
+  fetchCryptoLive();
+}, 30000);
+
+// Indices refresh every 60s (defined below via _fetchIndicesVercel interval)
+
+// Bootstrap retry: keep trying every 8s until we get live data (no cap — retries until success)
 let _bsRetries = 0;
-const _bsTimer = setInterval(()=>{
-  if (window._hasLiveData || _bsRetries++ > 12) { clearInterval(_bsTimer); return; }
+const _bsTimer = setInterval(() => {
+  if (window._hasLiveData) { clearInterval(_bsTimer); return; }
+  if (_bsRetries++ > 30) { clearInterval(_bsTimer); return; } // give up after 4 min
   _fastBootstrapStocks();
-}, 10000);
+}, 8000);
 
 
 // ── VISIBILITY-AWARE REFRESH: pause everything when tab not visible ──
