@@ -9296,19 +9296,62 @@ async function renderCompare(){
 
   // ── Step 1: Render prices IMMEDIATELY from liveStocks/STATIC_STOCKS ──
   const getStock = (sym, tech) => {
-    const live = liveStocks.find(x=>x.sym===sym) || {};
-    const stat = STATIC_STOCKS.find(x=>x.sym===sym) || {};
-    return Object.assign({}, stat, live, tech || {});
+    const live   = liveStocks.find(x=>x.sym===sym) || {};
+    const stat   = STATIC_STOCKS.find(x=>x.sym===sym) || {};
+    const staticTech = (typeof STATIC_TECH !== 'undefined' && STATIC_TECH[sym]) || {};
+    // Normalise STATIC_TECH field names to match what renderTable expects
+    const normalised = {
+      rsi:          staticTech.rsi,
+      overall:      staticTech.overall,
+      macd_bullish: staticTech.macd_bullish,
+      ma9:          staticTech.ma10  || staticTech.ema9,   // closest proxy
+      ma20:         staticTech.ma20,
+      ma50:         staticTech.ma50,
+      ma200:        staticTech.ma200,
+      above_ma9:    staticTech.ma10  != null ? (staticTech.price||stat.price||0) > staticTech.ma10  : null,
+      above_ma20:   staticTech.ma20  != null ? (staticTech.price||stat.price||0) > staticTech.ma20  : null,
+      above_ma50:   staticTech.above_ma50,
+      above_ma200:  staticTech.above_ma200,
+      high_52w:     staticTech.high_52w,
+      low_52w:      staticTech.low_52w,
+      pct_from_high: staticTech.pct_from_52h,
+      // extra fields shown in expanded rows
+      adx:          staticTech.adx,
+      rsi_val:      staticTech.rsi,
+      stoch_k:      staticTech.stoch_k,
+      stoch_d:      staticTech.stoch_d,
+      bb_pct:       staticTech.bb_pct,
+      bb_width:     staticTech.bb_width,
+      atr_pct:      staticTech.atr_pct,
+      macd:         staticTech.macd,
+      macd_signal:  staticTech.macd_signal,
+      macd_hist:    staticTech.macd_hist,
+      change_1w:    staticTech.change_1w,
+      change_1m:    staticTech.change_1m,
+      change_3m:    staticTech.change_3m,
+      support:      staticTech.support,
+      resistance:   staticTech.resistance,
+      vwap:         staticTech.vwap,
+    };
+    return Object.assign({}, stat, normalised, live, tech || {});
   };
 
   const renderTable = (stocks, techResults, loading) => {
     const fmt = (v,d) => v!=null&&v!==''?parseFloat(v).toLocaleString('en-IN',{maximumFractionDigits:d||2}):'—';
     const rows=[
       ['Price',         s => s.price?'₹'+fmt(s.price):'—',                                                          null],
-      ['Change Today',  s => s.chg||'—',                                                                             s => parseFloat(s.chg)>=0],
-      ['RSI (14)',      s => s.rsi!=null?s.rsi.toFixed(1)+' / 100':(loading?'…':'—'),                               s => s.rsi&&s.rsi>50],
+      ['Change Today',  s => { const c=parseFloat(s.chg||s.change_1d); return isNaN(c)?s.chg||'—':(c>=0?'+':'')+c.toFixed(2)+'%'; }, s => { const c=parseFloat(s.chg||s.change_1d); return !isNaN(c)&&c>=0; }],
+      ['Change 1W',     s => s.change_1w!=null?(s.change_1w>=0?'+':'')+s.change_1w.toFixed(2)+'%':'—',             s => s.change_1w!=null&&s.change_1w>=0],
+      ['Change 1M',     s => s.change_1m!=null?(s.change_1m>=0?'+':'')+s.change_1m.toFixed(2)+'%':'—',             s => s.change_1m!=null&&s.change_1m>=0],
+      ['Change 3M',     s => s.change_3m!=null?(s.change_3m>=0?'+':'')+s.change_3m.toFixed(2)+'%':'—',             s => s.change_3m!=null&&s.change_3m>=0],
       ['Signal',        s => s.overall||(loading?'…':'—'),                                                           s => (s.overall||'').includes('BUY')],
+      ['RSI (14)',      s => s.rsi!=null?s.rsi.toFixed(1)+' / 100':(loading?'…':'—'),                               s => s.rsi&&s.rsi>50],
       ['MACD',          s => s.macd_bullish!=null?(s.macd_bullish?'📈 Bullish':'📉 Bearish'):(loading?'…':'—'),     s => s.macd_bullish],
+      ['ADX',           s => s.adx!=null?s.adx.toFixed(0):(loading?'…':'—'),                                        s => s.adx!=null&&s.adx>25],
+      ['Stoch %K / %D', s => s.stoch_k!=null?s.stoch_k.toFixed(0)+' / '+s.stoch_d.toFixed(0):(loading?'…':'—'),   s => s.stoch_k!=null&&s.stoch_k>50],
+      ['BB %',          s => s.bb_pct!=null?s.bb_pct.toFixed(0)+'%':(loading?'…':'—'),                              s => s.bb_pct!=null&&s.bb_pct>50],
+      ['ATR %',         s => s.atr_pct!=null?s.atr_pct.toFixed(2)+'%':'—',                                          null],
+      ['VWAP',          s => s.vwap?'₹'+fmt(s.vwap):'—',                                                            null],
       ['9 DMA',         s => s.ma9?'₹'+fmt(s.ma9):(loading?'…':'—'),                                               null],
       ['Above 9 DMA',   s => s.above_ma9!=null?(s.above_ma9?'✓ Yes':'✗ No'):(loading?'…':'—'),                    s => s.above_ma9],
       ['20 DMA',        s => s.ma20?'₹'+fmt(s.ma20):(loading?'…':'—'),                                             null],
@@ -9317,6 +9360,8 @@ async function renderCompare(){
       ['Above 50 DMA',  s => s.above_ma50!=null?(s.above_ma50?'✓ Yes':'✗ No'):(loading?'…':'—'),                  s => s.above_ma50],
       ['200 DMA',       s => s.ma200?'₹'+fmt(s.ma200):(loading?'…':'—'),                                           null],
       ['Above 200 DMA', s => s.above_ma200!=null?(s.above_ma200?'✓ Yes':'✗ No'):(loading?'…':'—'),                s => s.above_ma200],
+      ['Support',       s => s.support?'₹'+fmt(s.support):'—',                                                      null],
+      ['Resistance',    s => s.resistance?'₹'+fmt(s.resistance):'—',                                                null],
       ['52W High',      s => s.high_52w?'₹'+fmt(s.high_52w):(loading?'…':'—'),                                     null],
       ['52W Low',       s => s.low_52w?'₹'+fmt(s.low_52w):(loading?'…':'—'),                                       null],
       ['From 52W High', s => s.pct_from_high!=null?(s.pct_from_high>=0?'+':'')+s.pct_from_high.toFixed(2)+'%':(loading?'…':'—'), s => s.pct_from_high!=null&&s.pct_from_high>=0],
@@ -9350,11 +9395,11 @@ async function renderCompare(){
       + '<table style="width:100%;border-collapse:collapse;font-size:13px;">' + thead + tbody + '</table></div>';
   };
 
-  // Immediately render with prices (technicals show "…")
+  // Immediately render with STATIC_TECH data (no loading state needed — data is already there)
   const initialStocks = picks.map(sym => getStock(sym, {}));
-  renderTable(initialStocks, null, true);
+  renderTable(initialStocks, null, false);
 
-  // Then fetch technicals async and re-render
+  // Then fetch live technicals async and re-render if we get better data
   const techResults = await Promise.all(picks.map(sym => fetchTechnicals(sym)));
   const finalStocks = picks.map((sym,i) => getStock(sym, techResults[i]));
   renderTable(finalStocks, techResults, false);
