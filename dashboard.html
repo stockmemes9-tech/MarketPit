@@ -5894,12 +5894,12 @@ function renderSettings(page) {
         <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:'Space Mono',monospace;">v1.0.0</div>
       </div>
       ${[
-        ['📋','Terms of Service','Community rules and usage'],
-        ['🔒','Privacy Policy','How your data is used'],
-        ['🐛','Report a Bug','Help improve MarketPit'],
-        ['💡','Suggest a Feature','Share your ideas'],
-      ].map(([icon,label,desc]) => `
-        <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);">
+        ['📋','Terms of Service','Community rules and usage','renderSettings("terms")'],
+        ['🔒','Privacy Policy','How your data is used','renderSettings("privacy_policy")'],
+        ['🐛','Report a Bug','Help improve MarketPit','window.location.href="mailto:marketxpit@gmail.com?subject=Bug%20Report%20%E2%80%94%20MarketPit&body=Describe%20the%20bug%3A%0A%0ASteps%20to%20reproduce%3A%0A%0ADevice%20%2F%20Browser%3A%0A"'],
+        ['💡','Suggest a Feature','Share your ideas','window.location.href="mailto:marketxpit@gmail.com?subject=Feature%20Suggestion%20%E2%80%94%20MarketPit&body=Describe%20your%20feature%20idea%3A%0A%0AWhy%20would%20it%20be%20useful%3A%0A"'],
+      ].map(([icon,label,desc,action]) => `
+        <div onclick="${action}" style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);cursor:pointer;">
           <span style="font-size:18px;">${icon}</span>
           <div style="flex:1;">
             <div style="font-weight:600;font-size:14px;color:var(--text);">${label}</div>
@@ -5907,6 +5907,86 @@ function renderSettings(page) {
           </div>
           <span style="color:var(--text3);">›</span>
         </div>`).join('')}`;
+
+  } else if (page === 'terms') {
+    title.textContent = 'TERMS OF SERVICE';
+    el.innerHTML = `
+      <button onclick="renderSettings('about')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
+      <div style="font-size:13px;color:var(--text2);line-height:1.7;">
+        <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:12px;">Terms of Service</div>
+        <div style="font-size:10px;color:var(--text3);font-family:'Space Mono',monospace;margin-bottom:18px;">Last updated: April 2026</div>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">1. Acceptance of Terms</div>
+        <p style="margin-bottom:14px;">By accessing or using MarketPit, you agree to be bound by these Terms of Service. If you do not agree, please do not use the platform.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">2. Use of the Platform</div>
+        <p style="margin-bottom:14px;">MarketPit is a community platform for discussing Indian financial markets. All content is for informational purposes only and does not constitute financial advice. You must be 18 years or older to use this platform.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">3. Community Rules</div>
+        <p style="margin-bottom:8px;">You agree not to:</p>
+        <ul style="margin-left:16px;margin-bottom:14px;">
+          <li style="margin-bottom:4px;">Post false, misleading, or manipulative information about securities</li>
+          <li style="margin-bottom:4px;">Harass, abuse, or threaten other community members</li>
+          <li style="margin-bottom:4px;">Share content that is illegal, defamatory, or violates others' rights</li>
+          <li style="margin-bottom:4px;">Use the platform for spam, solicitation, or commercial promotion without permission</li>
+        </ul>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">4. Paper Trading & Predictions</div>
+        <p style="margin-bottom:14px;">All trades and predictions on MarketPit are simulated using paper (virtual) money. No real money is involved. Results do not guarantee future performance.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">5. Data & Market Information</div>
+        <p style="margin-bottom:14px;">Market data is sourced from third-party providers and may be delayed. MarketPit makes no warranty as to accuracy, completeness, or timeliness of data.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">6. Disclaimer</div>
+        <p style="margin-bottom:14px;">MarketPit is not a SEBI-registered investment adviser. Nothing on this platform should be construed as investment advice. Always consult a qualified financial adviser before making investment decisions.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">7. Changes to Terms</div>
+        <p style="margin-bottom:14px;">We may update these terms at any time. Continued use of the platform after changes constitutes acceptance of the new terms.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">8. Contact</div>
+        <p style="margin-bottom:4px;">For any questions regarding these terms, contact us at:</p>
+        <a href="mailto:marketxpit@gmail.com" style="color:var(--accent);font-weight:600;text-decoration:none;">marketxpit@gmail.com</a>
+      </div>`;
+
+  } else if (page === 'privacy_policy') {
+    title.textContent = 'PRIVACY POLICY';
+    el.innerHTML = `
+      <button onclick="renderSettings('about')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
+      <div style="font-size:13px;color:var(--text2);line-height:1.7;">
+        <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:12px;">Privacy Policy</div>
+        <div style="font-size:10px;color:var(--text3);font-family:'Space Mono',monospace;margin-bottom:18px;">Last updated: April 2026</div>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">1. Information We Collect</div>
+        <p style="margin-bottom:8px;">MarketPit stores the following data locally on your device only:</p>
+        <ul style="margin-left:16px;margin-bottom:14px;">
+          <li style="margin-bottom:4px;">Username and display preferences you set</li>
+          <li style="margin-bottom:4px;">Posts and watchlist items you create</li>
+          <li style="margin-bottom:4px;">App settings (theme, font size, notifications)</li>
+          <li style="margin-bottom:4px;">Paper trade and prediction history</li>
+        </ul>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">2. How Your Data is Stored</div>
+        <p style="margin-bottom:14px;">All data is stored in your browser's local storage. MarketPit does not operate servers that collect or store your personal information. Your data never leaves your device unless you explicitly share it.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">3. Third-Party Data Sources</div>
+        <p style="margin-bottom:14px;">Market prices and financial data are fetched from third-party APIs (Yahoo Finance, Tickertape, etc.). When your browser requests this data, standard HTTP metadata such as your IP address may be visible to those providers under their own privacy policies.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">4. Cookies & Tracking</div>
+        <p style="margin-bottom:14px;">MarketPit does not use tracking cookies, analytics scripts, or advertising trackers. No data is sold or shared with advertisers.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">5. Data Deletion</div>
+        <p style="margin-bottom:14px;">You can delete all locally stored data at any time via Settings → Storage → Clear All Data. This permanently removes all your posts, watchlists, and preferences from the device.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">6. Children's Privacy</div>
+        <p style="margin-bottom:14px;">MarketPit is not intended for users under 18 years of age. We do not knowingly collect information from minors.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">7. Changes to This Policy</div>
+        <p style="margin-bottom:14px;">We may update this Privacy Policy from time to time. We encourage you to review it periodically.</p>
+
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px;">8. Contact</div>
+        <p style="margin-bottom:4px;">For privacy-related questions or requests, contact us at:</p>
+        <a href="mailto:marketxpit@gmail.com" style="color:var(--accent);font-weight:600;text-decoration:none;">marketxpit@gmail.com</a>
+      </div>`;
   }
 }
 
