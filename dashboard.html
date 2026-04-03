@@ -10215,81 +10215,67 @@ function renderSidebarMmi() {
   const tsEl = document.getElementById('sidebarMmiTs');
   if (!el) return;
 
-  const idx   = window._liveIndices || {};
-  const nifty = idx['NIFTY 50'] || idx['NIFTY'];
-  const bank  = idx['NIFTY BANK'] || idx['BANKNIFTY'];
-  const fii   = _fiiData && _fiiData.length ? _fiiData[0] : null;
-
-  let score = 50, signals = [];
-
-  if (nifty?.chg != null) {
-    const c = parseFloat(nifty.chg);
-    if      (c >  1.5) { score += 18; signals.push({ label:'Nifty 50',   val:(c>=0?'+':'')+c.toFixed(2)+'%', col:'#00c853' }); }
-    else if (c >  0.3) { score += 9;  signals.push({ label:'Nifty 50',   val:'+'+c.toFixed(2)+'%',           col:'#69f0ae' }); }
-    else if (c > -0.3) {              signals.push({ label:'Nifty 50',   val:c.toFixed(2)+'%',                col:'#ffd740' }); }
-    else if (c > -1.5) { score -= 9;  signals.push({ label:'Nifty 50',   val:c.toFixed(2)+'%',               col:'#ff6d00' }); }
-    else               { score -= 18; signals.push({ label:'Nifty 50',   val:c.toFixed(2)+'%',               col:'#ff3b3b' }); }
+  // ── If rich _mmiData is available, reuse _calcMoodScore for accuracy ──
+  let score, zone, zoneCol, emoji, signals, ttSource;
+  if (_mmiData) {
+    const result = _calcMoodScore(_mmiData);
+    score = result.score; zone = result.zone; zoneCol = result.zoneCol;
+    emoji = result.emoji; signals = result.signals; ttSource = result.ttSource;
+  } else {
+    // Pre-fetch fallback: estimate from live indices only
+    const idx   = window._liveIndices || {};
+    const nifty = idx['NIFTY 50'] || idx['NIFTY'];
+    const bank  = idx['NIFTY BANK'] || idx['BANKNIFTY'];
+    score = 50; signals = [];
+    if (nifty?.chg != null) {
+      const c = parseFloat(nifty.chg);
+      if      (c >  2.0) { score += 20; signals.push({ label:'Nifty 50', val:(c>=0?'+':'')+c.toFixed(2)+'%', col:'#00c853' }); }
+      else if (c >  0.5) { score += 10; signals.push({ label:'Nifty 50', val:(c>=0?'+':'')+c.toFixed(2)+'%', col:'#69f0ae' }); }
+      else if (c > -0.5) {              signals.push({ label:'Nifty 50', val:c.toFixed(2)+'%',                col:'#ffd740' }); }
+      else if (c > -2.0) { score -= 10; signals.push({ label:'Nifty 50', val:c.toFixed(2)+'%',               col:'#ff6d00' }); }
+      else               { score -= 20; signals.push({ label:'Nifty 50', val:c.toFixed(2)+'%',               col:'#ff3b3b' }); }
+    }
+    if (bank?.chg != null && nifty?.chg != null) {
+      const bc = parseFloat(bank.chg), nc = parseFloat(nifty.chg);
+      const spread = bc - nc;
+      if      (spread >  0.5) { score += 7;  signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', col:'#69f0ae' }); }
+      else if (spread < -0.5) { score -= 7;  signals.push({ label:'Bank Nifty', val:bc.toFixed(2)+'%',                col:'#ff6d00' }); }
+      else                    {              signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', col:'#ffd740' }); }
+    }
+    score = Math.max(0, Math.min(100, score));
+    if      (score >= 75) { zone='Extreme Greed'; zoneCol='#00c853'; emoji='🤑'; }
+    else if (score >= 55) { zone='Greed';         zoneCol='#69f0ae'; emoji='😄'; }
+    else if (score >= 45) { zone='Neutral';       zoneCol='#ffd740'; emoji='😐'; }
+    else if (score >= 25) { zone='Fear';          zoneCol='#ff6d00'; emoji='😨'; }
+    else                  { zone='Extreme Fear';  zoneCol='#ff3b3b'; emoji='😱'; }
+    ttSource = false;
   }
-  if (bank?.chg != null && nifty?.chg != null) {
-    const bc = parseFloat(bank.chg), nc = parseFloat(nifty.chg);
-    const spread = bc - nc;
-    if      (spread >  0.5) { score += 7;  signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', col:'#69f0ae' }); }
-    else if (spread < -0.5) { score -= 7;  signals.push({ label:'Bank Nifty', val:bc.toFixed(2)+'%',                col:'#ff6d00' }); }
-    else                    {              signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', col:'#ffd740' }); }
-  }
-
-
-  score = Math.max(0, Math.min(100, score));
-
-  // ── Override with Tickertape real MMI if fetched ──────────────────
-  const ttSrc = _mmiData && _mmiData.ttSource && _mmiData.ttScore != null;
-  if (ttSrc) score = Math.max(0, Math.min(100, _mmiData.ttScore));
-
-  let zone, zoneCol, emoji;
-  if      (score >= 75) { zone='Extreme Greed'; zoneCol='#00c853'; emoji='🤑'; }
-  else if (score >= 55) { zone='Greed';         zoneCol='#69f0ae'; emoji='😄'; }
-  else if (score >= 45) { zone='Neutral';       zoneCol='#ffd740'; emoji='😐'; }
-  else if (score >= 25) { zone='Fear';          zoneCol='#ff6d00'; emoji='😨'; }
-  else                  { zone='Extreme Fear';  zoneCol='#ff3b3b'; emoji='😱'; }
 
   const angle = -90 + (score / 100) * 180;
   const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'});
-  if (tsEl) tsEl.textContent = ts + ' IST' + (ttSrc ? ' · ✓ TT' : '');
+  if (tsEl) tsEl.textContent = ts + ' IST' + (ttSource ? ' · ✓ TT' : '');
 
-  // ── Full-width centered layout ──
   let html = '<div style="text-align:center;padding:4px 0 10px;">'
-
-    // Large semicircle gauge — centered, full width
     + '<div style="display:flex;justify-content:center;margin-bottom:6px;">'
       + '<svg viewBox="0 0 160 90" width="220" height="124" style="overflow:visible;">'
-        // Coloured arc segments
         + '<path d="M14 80 A66 66 0 0 1 47 20" stroke="#ff3b3b" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.85"/>'
         + '<path d="M47 20 A66 66 0 0 1 80 12"  stroke="#ff6d00" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.85"/>'
         + '<path d="M80 12 A66 66 0 0 1 113 20" stroke="#ffd740" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.85"/>'
         + '<path d="M113 20 A66 66 0 0 1 146 80" stroke="#00c853" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.85"/>'
-        // Zone labels
         + '<text x="8"   y="90" font-size="7" fill="#ff3b3b" font-family="monospace" opacity="0.8">Fear</text>'
         + '<text x="126" y="90" font-size="7" fill="#00c853" font-family="monospace" opacity="0.8">Greed</text>'
-        // Needle
         + '<line x1="80" y1="80" x2="80" y2="18" stroke="' + zoneCol + '" stroke-width="3" stroke-linecap="round" transform="rotate(' + angle + ' 80 80)" style="transition:transform 0.8s ease;"/>'
-        // Center dot
         + '<circle cx="80" cy="80" r="6" fill="' + zoneCol + '"/>'
         + '<circle cx="80" cy="80" r="3" fill="var(--bg2)"/>'
-        // Score in center
         + '<text x="80" y="72" text-anchor="middle" font-size="18" font-weight="900" fill="' + zoneCol + '" font-family="monospace">' + score + '</text>'
       + '</svg>'
     + '</div>'
-
-    // Zone label
     + '<div style="font-size:18px;font-weight:900;color:' + zoneCol + ';letter-spacing:-0.3px;margin-bottom:2px;">' + emoji + ' ' + zone + '</div>'
     + '<div style="font-size:10px;color:var(--text3);font-family:Space Mono,monospace;margin-bottom:10px;">Market Sentiment Score: ' + score + '/100</div>'
-
   + '</div>'
-
-  // Signal cards — 3 in a row
   + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px;">';
 
-  signals.forEach(s => {
+  signals.slice(0, 6).forEach(s => {
     html += '<div style="background:' + s.col + '12;border:1px solid ' + s.col + '33;border-radius:8px;padding:6px 4px;text-align:center;">'
       + '<div style="font-size:9px;color:var(--text3);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + s.label + '</div>'
       + '<div style="font-size:11px;font-weight:800;color:' + s.col + ';font-family:Space Mono,monospace;">' + s.val + '</div>'
@@ -10297,7 +10283,6 @@ function renderSidebarMmi() {
   });
 
   html += '</div>';
-
   el.innerHTML = html;
 }
 
@@ -10319,138 +10304,309 @@ async function renderMmi() {
 }
 
 async function _fetchMmiData() {
-  // ── Step 1: Try Tickertape MMI API via CORS proxy chain ──────────
-  let ttScore = null, ttZone = null, ttSource = false;
-  const _TT_URL = 'https://api.tickertape.in/market-mood-index/12m';
+  // ══════════════════════════════════════════════════════════════════
+  // SOURCE 1: Tickertape MMI API — the real India MMI (try via proxies)
+  // ══════════════════════════════════════════════════════════════════
+  let ttScore = null, ttZone = null, ttSource = false, ttSourceLabel = '';
+  const _TT_URLS = [
+    'https://api.tickertape.in/market-mood-index/12m',
+    'https://api.tickertape.in/market-mood-index/3m',
+    'https://api.tickertape.in/market-mood-index/1m',
+  ];
   const _TT_PROXIES = [
     u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
     u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
     u => `https://thingproxy.freeboard.io/fetch/${u}`,
   ];
-  for (const proxyFn of _TT_PROXIES) {
-    try {
-      const r = await fetch(proxyFn(_TT_URL), { signal: AbortSignal.timeout(8000) });
-      if (!r.ok) continue;
-      const raw = await r.json();
-      // allorigins wraps response in { contents: "..." }
-      const parsed = raw && raw.contents ? JSON.parse(raw.contents) : raw;
-      const arr = parsed && parsed.data;
-      if (arr && arr.length) {
-        const latest = arr[arr.length - 1];
-        ttScore  = typeof latest.value === 'number' ? Math.round(latest.value) : null;
-        ttZone   = latest.classification || null;
-        ttSource = ttScore != null;
-        if (ttSource) break; // got a valid score, stop trying proxies
-      }
-    } catch(e) { continue; }
+  outer:
+  for (const ttUrl of _TT_URLS) {
+    for (const proxyFn of _TT_PROXIES) {
+      try {
+        const r = await fetch(proxyFn(ttUrl), { signal: AbortSignal.timeout(8000) });
+        if (!r.ok) continue;
+        const raw = await r.json();
+        const parsed = (raw && raw.contents) ? JSON.parse(raw.contents) : raw;
+        const arr = parsed && (parsed.data || parsed.mmiData);
+        if (arr && arr.length) {
+          const latest = arr[arr.length - 1];
+          const v = typeof latest.value === 'number' ? latest.value
+                  : typeof latest.score === 'number' ? latest.score
+                  : typeof latest.mmi   === 'number' ? latest.mmi : null;
+          if (v != null) {
+            ttScore = Math.round(Math.max(0, Math.min(100, v)));
+            ttZone  = latest.classification || latest.zone || null;
+            ttSource = true;
+            ttSourceLabel = '✓ Tickertape';
+            break outer;
+          }
+        }
+      } catch(e) { continue; }
+    }
   }
 
-  // ── Step 2: Fetch supporting market data (VIX, indices) via YF ───
+  // ══════════════════════════════════════════════════════════════════
+  // SOURCE 2: Fetch rich YF data — VIX + indices + 52-week range
+  // ══════════════════════════════════════════════════════════════════
+  let vixData = null, niftyData = null, bankData = null, sensexData = null;
+  let nifty52H = null, nifty52L = null, vix52H = null, vix52L = null;
+
   try {
+    // Fetch with broader fields to get 52-week high/low for better scoring
     const syms = ['^INDIAVIX', '^NSEI', '^NSEBANK', '^BSESN'];
     const map  = await yfBatchFetch(syms);
-    const get  = sym => { const d = map.get(sym); return d ? { price: d.price, chg: d.chg } : null; };
-    _mmiData = {
-      vix:      get('^INDIAVIX'),
-      nifty:    get('^NSEI'),
-      bank:     get('^NSEBANK'),
-      sensex:   get('^BSESN'),
-      fii:      _fiiData && _fiiData.length ? _fiiData[0] : null,
-      ts:       Date.now(),
-      ttScore:  ttScore,
-      ttZone:   ttZone,
-      ttSource: ttSource,
+
+    const gd = sym => {
+      const d = map.get(sym);
+      return d ? { price: d.price, chg: d.chg, prev: d.prev } : null;
     };
-    _mmiLastFetch = Date.now();
+    vixData   = gd('^INDIAVIX');
+    niftyData = gd('^NSEI');
+    bankData  = gd('^NSEBANK');
+    sensexData= gd('^BSESN');
+
+    // Also try to get 52-week data from v8 chart (1y range gives us history for RSI/momentum)
+    const _getChartData = async (sym) => {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1y`;
+      for (const proxyFn of _PROXY_WRAP) {
+        try {
+          const r = await fetch(proxyFn(url), { signal: AbortSignal.timeout(10000) });
+          if (!r.ok) continue;
+          const raw = await r.json();
+          const parsed = (raw && raw.contents) ? JSON.parse(raw.contents) : raw;
+          const result = parsed?.chart?.result?.[0];
+          if (!result) continue;
+          const closes = result.indicators?.quote?.[0]?.close?.filter(v => v != null) || [];
+          const meta   = result.meta || {};
+          return { closes, high52: meta.fiftyTwoWeekHigh, low52: meta.fiftyTwoWeekLow, meta };
+        } catch(e) { continue; }
+      }
+      return null;
+    };
+
+    // Fetch 1-year chart for Nifty and VIX in parallel (non-blocking — best effort)
+    const [niftyChart, vixChart] = await Promise.allSettled([
+      _getChartData('%5ENSEI'),
+      _getChartData('%5EINDIAVIX'),
+    ]);
+
+    if (niftyChart.status === 'fulfilled' && niftyChart.value) {
+      const { closes, high52, low52 } = niftyChart.value;
+      nifty52H = high52;
+      nifty52L = low52;
+      // Compute 14-day RSI from closes
+      if (closes.length >= 15) {
+        const gains = [], losses = [];
+        for (let i = closes.length - 14; i < closes.length; i++) {
+          const diff = closes[i] - closes[i-1];
+          if (diff >= 0) { gains.push(diff); losses.push(0); }
+          else           { gains.push(0);    losses.push(-diff); }
+        }
+        const avgG = gains.reduce((a,b)=>a+b,0)/14;
+        const avgL = losses.reduce((a,b)=>a+b,0)/14;
+        window._mmiRsi14 = avgL === 0 ? 100 : Math.round(100 - (100 / (1 + avgG/avgL)));
+      }
+      // 50-day momentum (price vs 50-day SMA)
+      if (closes.length >= 50) {
+        const sma50 = closes.slice(-50).reduce((a,b)=>a+b,0) / 50;
+        window._mmiMomentum = ((closes[closes.length-1] - sma50) / sma50) * 100;
+      }
+    }
+    if (vixChart.status === 'fulfilled' && vixChart.value) {
+      const { high52, low52 } = vixChart.value;
+      vix52H = high52;
+      vix52L = low52;
+    }
+
     if (!window._liveIndices) window._liveIndices = {};
     const mk = (d) => d ? { price: d.price, chg: (d.chg>=0?'+':'')+d.chg.toFixed(2)+'%', up: d.chg>=0 } : null;
     const n = mk(map.get('^NSEI'));    if (n) { window._liveIndices['NIFTY 50']=n;   window._liveIndices['NIFTY']=n; }
     const b = mk(map.get('^NSEBANK')); if (b) { window._liveIndices['NIFTY BANK']=b; window._liveIndices['BANKNIFTY']=b; }
     const s = mk(map.get('^BSESN'));   if (s) { window._liveIndices['SENSEX']=s; }
   } catch(e) {
-    if (!_mmiData) {
-      const idx = window._liveIndices || {};
-      _mmiData = {
-        nifty:    idx['NIFTY 50']   || idx['NIFTY']    || null,
-        bank:     idx['NIFTY BANK'] || idx['BANKNIFTY'] || null,
-        sensex:   idx['SENSEX']     || null,
-        vix:      null,
-        fii:      _fiiData && _fiiData.length ? _fiiData[0] : null,
-        ts:       Date.now(),
-        ttScore:  ttScore,
-        ttZone:   ttZone,
-        ttSource: ttSource,
-      };
-      _mmiLastFetch = Date.now();
-    } else {
-      _mmiData.ttScore  = ttScore;
-      _mmiData.ttZone   = ttZone;
-      _mmiData.ttSource = ttSource;
+    // Fallback to already-fetched index data
+    const idx = window._liveIndices || {};
+    const pf  = s => { const v=parseFloat(s); return isNaN(v)?null:v; };
+    if (!niftyData) {
+      const n = idx['NIFTY 50'] || idx['NIFTY'];
+      if (n) niftyData = { price: n.price, chg: pf(n.chg) };
+    }
+    if (!bankData) {
+      const b = idx['NIFTY BANK'] || idx['BANKNIFTY'];
+      if (b) bankData = { price: b.price, chg: pf(b.chg) };
     }
   }
+
+  _mmiData = {
+    vix:        vixData,
+    nifty:      niftyData,
+    bank:       bankData,
+    sensex:     sensexData,
+    nifty52H,   nifty52L,
+    vix52H,     vix52L,
+    rsi14:      window._mmiRsi14 || null,
+    momentum:   window._mmiMomentum || null,
+    fii:        _fiiData && _fiiData.length ? _fiiData[0] : null,
+    ts:         Date.now(),
+    ttScore,    ttZone,    ttSource,  ttSourceLabel,
+  };
+  _mmiLastFetch = Date.now();
 }
 
 function _calcMoodScore(data) {
-  let signals = [];
+  // ── If Tickertape gave us a real score, use it directly ──────────
+  if (data.ttSource && data.ttScore != null) {
+    const score = Math.max(0, Math.min(100, data.ttScore));
+    let zone, zoneCol, emoji;
+    if      (score >= 75) { zone='Extreme Greed'; zoneCol='#00c853'; emoji='🤑'; }
+    else if (score >= 55) { zone='Greed';         zoneCol='#69f0ae'; emoji='😄'; }
+    else if (score >= 45) { zone='Neutral';       zoneCol='#ffd740'; emoji='😐'; }
+    else if (score >= 25) { zone='Fear';          zoneCol='#ff6d00'; emoji='😨'; }
+    else                  { zone='Extreme Fear';  zoneCol='#ff3b3b'; emoji='😱'; }
+    // Still build signals for display
+    const signals = _buildSignals(data);
+    return { score, zone, zoneCol, emoji, signals, ttSource: true, sourceLabel: data.ttSourceLabel || '✓ Tickertape' };
+  }
 
-  // ── Build supporting signals from live market data ────────────────
+  // ── Computed MMI: weighted 6-factor model (mirrors Tickertape methodology) ──
+  //
+  // Factor 1 — India VIX (30%): volatility fear gauge
+  //   VIX <11 = Extreme Greed (100), VIX 11-14 = Greed (75), VIX 14-18 = Neutral (50),
+  //   VIX 18-22 = Fear (30), VIX 22-25 = Extreme Fear (15), VIX >25 = Panic (0)
+  //
+  // Factor 2 — VIX vs 52-week range (10%): is current VIX high or low vs history?
+  //   VIX near 52wk low = Greed, near 52wk high = Fear
+  //
+  // Factor 3 — Nifty 14-day RSI (20%): overbought/oversold
+  //   RSI >70 = Greed, RSI 50-70 = Mild Greed, RSI 30-50 = Mild Fear, RSI <30 = Extreme Fear
+  //
+  // Factor 4 — Nifty 50-day Momentum (20%): price vs 50-DMA
+  //   +5% above = Greed, flat = Neutral, -5% below = Fear
+  //
+  // Factor 5 — Nifty 52-week position (10%): where is price in annual range?
+  //
+  // Factor 6 — FII flow (10%): net foreign buying or selling
+
+  let totalWeight = 0, weightedScore = 0;
+  const signals = [];
+
+  // ── Factor 1: India VIX absolute level (weight 30) ────────────────
   if (data.vix && data.vix.price != null) {
     const v = data.vix.price;
-    let mood, col;
-    if      (v < 12) { mood='Extreme Greed'; col='#00c853'; }
-    else if (v < 15) { mood='Greed';         col='#69f0ae'; }
-    else if (v < 20) { mood='Neutral';       col='#ffd740'; }
-    else if (v < 25) { mood='Fear';          col='#ff6d00'; }
-    else             { mood='Extreme Fear';  col='#d50000'; }
-    signals.push({label:'India VIX', val: v.toFixed(1), mood: mood, col: col});
-  }
-  if (data.nifty && data.nifty.chg != null) {
-    const c = data.nifty.chg;
-    let mood, col;
-    if      (c >  1) { mood='Bullish';       col='#00c853'; }
-    else if (c >  0) { mood='Mildly Bullish';col='#69f0ae'; }
-    else if (c > -1) { mood='Mildly Bearish';col='#ff6d00'; }
-    else             { mood='Bearish';       col='#d50000'; }
-    signals.push({label:'Nifty 50', val:(c>=0?'+':'')+c.toFixed(2)+'%', mood: mood, col: col});
-  }
-  if (data.bank && data.bank.chg != null && data.nifty && data.nifty.chg != null) {
-    const spread = data.bank.chg - data.nifty.chg;
-    const bc = data.bank.chg;
-    let mood, col;
-    if      (spread >  0.5) { mood='Banks Leading'; col='#69f0ae'; }
-    else if (spread < -0.5) { mood='Banks Lagging'; col='#ff6d00'; }
-    else                    { mood='In-line';        col='#ffd740'; }
-    signals.push({label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', mood: mood, col: col});
+    let f1, mood, col;
+    if      (v < 11)  { f1=90; mood='Extreme Calm'; col='#00c853'; }
+    else if (v < 14)  { f1=72; mood='Low Volatility'; col='#69f0ae'; }
+    else if (v < 18)  { f1=50; mood='Neutral';      col='#ffd740'; }
+    else if (v < 22)  { f1=30; mood='Elevated Fear'; col='#ff6d00'; }
+    else if (v < 26)  { f1=15; mood='High Fear';    col='#ff4500'; }
+    else              { f1=5;  mood='Panic Zone';   col='#d50000'; }
+    weightedScore += f1 * 30; totalWeight += 30;
+    signals.push({ label:'India VIX', val:v.toFixed(1), mood, col, weight:30 });
   }
 
-  // ── Score: use Tickertape real MMI if available, else calculate ───
-  let score, ttSource = data.ttSource;
-  if (ttSource && data.ttScore != null) {
-    score = Math.max(0, Math.min(100, data.ttScore));
+  // ── Factor 2: VIX vs 52-week range (weight 10) ────────────────────
+  if (data.vix && data.vix.price != null && data.vix52H && data.vix52L) {
+    const v = data.vix.price, h = data.vix52H, l = data.vix52L;
+    const range = h - l;
+    if (range > 0) {
+      const pos = (v - l) / range; // 0=low(greed), 1=high(fear)
+      const f2 = Math.round((1 - pos) * 100);
+      const mood = pos < 0.3 ? 'VIX Near Annual Low' : pos > 0.7 ? 'VIX Near Annual High' : 'VIX Mid-Range';
+      const col  = pos < 0.3 ? '#69f0ae' : pos > 0.7 ? '#ff6d00' : '#ffd740';
+      weightedScore += f2 * 10; totalWeight += 10;
+      signals.push({ label:'VIX 52-wk Pos', val:`${Math.round(pos*100)}th%ile`, mood, col, weight:10 });
+    }
+  }
+
+  // ── Factor 3: Nifty RSI-14 (weight 20) ───────────────────────────
+  const rsi = data.rsi14;
+  if (rsi != null) {
+    let f3, mood, col;
+    if      (rsi > 75) { f3=88; mood='Overbought (Greed)'; col='#00c853'; }
+    else if (rsi > 60) { f3=68; mood='Mildly Overbought';  col='#69f0ae'; }
+    else if (rsi > 45) { f3=52; mood='Neutral RSI';        col='#ffd740'; }
+    else if (rsi > 30) { f3=32; mood='Mildly Oversold';    col='#ff6d00'; }
+    else               { f3=12; mood='Oversold (Fear)';    col='#d50000'; }
+    weightedScore += f3 * 20; totalWeight += 20;
+    signals.push({ label:'Nifty RSI-14', val:`${rsi}`, mood, col, weight:20 });
+  } else if (data.nifty && data.nifty.chg != null) {
+    // RSI not available — proxy via price change (weight 20 still)
+    const c = data.nifty.chg;
+    let f3, mood, col;
+    if      (c >  2.0) { f3=85; mood='Strong Rally';    col='#00c853'; }
+    else if (c >  0.5) { f3=65; mood='Bullish';         col='#69f0ae'; }
+    else if (c > -0.5) { f3=50; mood='Flat/Neutral';    col='#ffd740'; }
+    else if (c > -2.0) { f3=32; mood='Bearish';         col='#ff6d00'; }
+    else               { f3=12; mood='Sharp Sell-off';  col='#d50000'; }
+    weightedScore += f3 * 20; totalWeight += 20;
+    signals.push({ label:'Nifty 50', val:(c>=0?'+':'')+c.toFixed(2)+'%', mood, col, weight:20 });
+  }
+
+  // ── Factor 4: Nifty Momentum vs 50-DMA (weight 20) ───────────────
+  const mom = data.momentum;
+  if (mom != null) {
+    let f4, mood, col;
+    if      (mom >  6) { f4=88; mood='Well Above 50-DMA'; col='#00c853'; }
+    else if (mom >  2) { f4=65; mood='Above 50-DMA';      col='#69f0ae'; }
+    else if (mom > -2) { f4=50; mood='Near 50-DMA';       col='#ffd740'; }
+    else if (mom > -6) { f4=30; mood='Below 50-DMA';      col='#ff6d00'; }
+    else               { f4=10; mood='Far Below 50-DMA';  col='#d50000'; }
+    weightedScore += f4 * 20; totalWeight += 20;
+    signals.push({ label:'50-DMA Momentum', val:(mom>=0?'+':'')+mom.toFixed(1)+'%', mood, col, weight:20 });
+  } else if (data.bank && data.bank.chg != null && data.nifty && data.nifty.chg != null) {
+    // Momentum not available — use Bank Nifty spread as proxy (weight 10)
+    const spread = data.bank.chg - data.nifty.chg;
+    const bc = data.bank.chg;
+    let f4, mood, col;
+    if      (spread >  1.0) { f4=70; mood='Banks Strongly Leading'; col='#00c853'; }
+    else if (spread >  0.3) { f4=60; mood='Banks Leading';          col='#69f0ae'; }
+    else if (spread > -0.3) { f4=50; mood='Broad-based Move';       col='#ffd740'; }
+    else if (spread > -1.0) { f4=38; mood='Banks Lagging';          col='#ff6d00'; }
+    else                    { f4=25; mood='Banks Sharply Lagging';  col='#d50000'; }
+    weightedScore += f4 * 10; totalWeight += 10;
+    signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', mood, col, weight:10 });
+  }
+
+  // ── Factor 5: Nifty 52-week position (weight 10) ─────────────────
+  if (data.nifty && data.nifty.price && data.nifty52H && data.nifty52L) {
+    const p = data.nifty.price, h = data.nifty52H, l = data.nifty52L;
+    const range = h - l;
+    if (range > 0) {
+      const pos = (p - l) / range; // 0=near 52wk low(fear), 1=near 52wk high(greed)
+      const f5 = Math.round(pos * 100);
+      const mood = pos > 0.75 ? 'Near 52wk High' : pos < 0.25 ? 'Near 52wk Low' : '52wk Mid-Range';
+      const col  = pos > 0.75 ? '#00c853' : pos < 0.25 ? '#ff6d00' : '#ffd740';
+      weightedScore += f5 * 10; totalWeight += 10;
+      signals.push({ label:'52-wk Position', val:`${Math.round(pos*100)}th%ile`, mood, col, weight:10 });
+    }
+  }
+
+  // ── Factor 6: FII net flow (weight 10) ───────────────────────────
+  if (data.fii) {
+    const net = typeof data.fii.net === 'number' ? data.fii.net
+              : typeof data.fii.netEquity === 'number' ? data.fii.netEquity
+              : typeof data.fii.netFlow === 'number' ? data.fii.netFlow : null;
+    if (net != null) {
+      let f6, mood, col;
+      if      (net >  3000) { f6=85; mood='Strong FII Buying';  col='#00c853'; }
+      else if (net >   500) { f6=65; mood='FII Buying';         col='#69f0ae'; }
+      else if (net >  -500) { f6=50; mood='FII Neutral';        col='#ffd740'; }
+      else if (net > -3000) { f6=32; mood='FII Selling';        col='#ff6d00'; }
+      else                  { f6=12; mood='Heavy FII Selling';  col='#d50000'; }
+      weightedScore += f6 * 10; totalWeight += 10;
+      signals.push({ label:'FII Flow', val:(net>=0?'+':'')+Math.round(net/100)/10+'K Cr', mood, col, weight:10 });
+    }
+  }
+
+  // ── Compute final score ──────────────────────────────────────────
+  let score;
+  if (totalWeight >= 50) {
+    score = Math.round(Math.max(0, Math.min(100, weightedScore / totalWeight)));
   } else {
+    // Not enough data — basic fallback
     score = 50;
-    if (data.vix && data.vix.price != null) {
-      const v = data.vix.price;
-      if      (v < 12) score += 20;
-      else if (v < 15) score += 10;
-      else if (v < 20) score += 0;
-      else if (v < 25) score -= 10;
-      else             score -= 20;
-    }
-    if (data.nifty && data.nifty.chg != null) {
-      const c = data.nifty.chg;
-      if      (c >  1) score += 15;
-      else if (c >  0) score += 7;
-      else if (c > -1) score -= 7;
-      else             score -= 15;
-    }
-    if (data.bank && data.bank.chg != null && data.nifty && data.nifty.chg != null) {
-      const spread = data.bank.chg - data.nifty.chg;
-      if      (spread >  0.5) score += 5;
-      else if (spread < -0.5) score -= 5;
-    }
-    score = Math.max(0, Math.min(100, score));
+    if (data.nifty?.chg != null) score += Math.max(-20, Math.min(20, data.nifty.chg * 8));
+    score = Math.round(Math.max(0, Math.min(100, score)));
   }
 
   let zone, zoneCol, emoji;
@@ -10458,13 +10614,36 @@ function _calcMoodScore(data) {
   else if (score >= 55) { zone='Greed';         zoneCol='#69f0ae'; emoji='😄'; }
   else if (score >= 45) { zone='Neutral';       zoneCol='#ffd740'; emoji='😐'; }
   else if (score >= 25) { zone='Fear';          zoneCol='#ff6d00'; emoji='😨'; }
-  else                  { zone='Extreme Fear';  zoneCol='#d50000'; emoji='😱'; }
+  else                  { zone='Extreme Fear';  zoneCol='#ff3b3b'; emoji='😱'; }
 
-  return { score, zone, zoneCol, emoji, signals, ttSource };
+  return { score, zone, zoneCol, emoji, signals, ttSource: false, sourceLabel: '⚡ Calculated' };
+}
+
+// Helper: build signals array for Tickertape path (used for display only)
+function _buildSignals(data) {
+  const signals = [];
+  if (data.vix?.price != null) {
+    const v = data.vix.price;
+    const col = v < 14 ? '#69f0ae' : v < 18 ? '#ffd740' : v < 22 ? '#ff6d00' : '#d50000';
+    const mood = v < 14 ? 'Low Volatility' : v < 18 ? 'Moderate VIX' : v < 22 ? 'Elevated Fear' : 'Panic Zone';
+    signals.push({ label:'India VIX', val:v.toFixed(1), mood, col });
+  }
+  if (data.nifty?.chg != null) {
+    const c = data.nifty.chg;
+    const col = c > 1 ? '#00c853' : c > 0 ? '#69f0ae' : c > -1 ? '#ff6d00' : '#d50000';
+    const mood = c > 1 ? 'Bullish' : c > 0 ? 'Mildly Bullish' : c > -1 ? 'Mildly Bearish' : 'Bearish';
+    signals.push({ label:'Nifty 50', val:(c>=0?'+':'')+c.toFixed(2)+'%', mood, col });
+  }
+  if (data.bank?.chg != null) {
+    const bc = data.bank.chg;
+    const col = bc > 0 ? '#69f0ae' : '#ff6d00';
+    signals.push({ label:'Bank Nifty', val:(bc>=0?'+':'')+bc.toFixed(2)+'%', mood:'', col });
+  }
+  return signals;
 }
 
 function _renderMmiHtml(el, data) {
-  const { score, zone, zoneCol, emoji, signals, ttSource } = _calcMoodScore(data);
+  const { score, zone, zoneCol, emoji, signals, ttSource, sourceLabel } = _calcMoodScore(data);
 
   // Gauge needle angle: score 0→100 maps to -90°→90°
   const angle = -90 + (score / 100) * 180;
@@ -10475,7 +10654,7 @@ function _renderMmiHtml(el, data) {
 
   // ── Gauge ──────────────────────────────────────────────────────────
   html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px 24px 20px;margin-bottom:16px;text-align:center;">'
-    + '<div style="font-size:11px;color:var(--text3);font-family:\'Space Mono\',monospace;letter-spacing:1px;margin-bottom:16px;">MARKET MOOD INDEX · Updated ' + ts + ' IST &nbsp;' + (ttSource ? '<span style="background:rgba(0,200,120,0.12);border:1px solid rgba(0,200,120,0.3);border-radius:6px;padding:1px 7px;font-size:9px;color:#00c878;letter-spacing:0.5px;vertical-align:middle;">✓ Tickertape</span>' : '<span style="background:rgba(255,180,0,0.1);border:1px solid rgba(255,180,0,0.25);border-radius:6px;padding:1px 7px;font-size:9px;color:#ffd740;letter-spacing:0.5px;vertical-align:middle;">⚡ Calculated</span>') + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);font-family:\'Space Mono\',monospace;letter-spacing:1px;margin-bottom:16px;">MARKET MOOD INDEX · Updated ' + ts + ' IST &nbsp;' + (ttSource ? '<span style="background:rgba(0,200,120,0.12);border:1px solid rgba(0,200,120,0.3);border-radius:6px;padding:1px 7px;font-size:9px;color:#00c878;letter-spacing:0.5px;vertical-align:middle;">' + (sourceLabel||'✓ Tickertape') + '</span>' : '<span style="background:rgba(255,180,0,0.1);border:1px solid rgba(255,180,0,0.25);border-radius:6px;padding:1px 7px;font-size:9px;color:#ffd740;letter-spacing:0.5px;vertical-align:middle;">⚡ Calculated · 6 Factors</span>') + '</div>'
     // SVG Gauge
     + '<div style="position:relative;display:inline-block;width:260px;">'
     + '<svg viewBox="0 0 260 150" width="260" height="150">'
