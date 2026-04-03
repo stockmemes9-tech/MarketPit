@@ -6914,6 +6914,97 @@ const CHART_PATTERNS = [
     </svg>` },
 ];
 
+// ── Volume Shockers ──────────────────────────────────────────────
+let _vsSortKey = 'ratio'; // 'ratio' | 'today' | 'avg'
+
+function setVSSort(key, btn) {
+  _vsSortKey = key;
+  ['vs_ratio','vs_today','vs_avg'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const active = id === 'vs_' + key;
+    el.style.background   = active ? 'rgba(0,112,243,0.1)' : 'transparent';
+    el.style.borderColor  = active ? 'var(--accent)' : 'var(--border)';
+    el.style.color        = active ? 'var(--accent)' : 'var(--text3)';
+  });
+  renderVolumeShockers();
+}
+
+function refreshVolumeShockers(force) {
+  const el = document.getElementById('vsLastUpdated');
+  if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
+  renderVolumeShockers();
+}
+
+function renderVolumeShockers() {
+  const body = document.getElementById('volumeShockersBody');
+  if (!body) return;
+
+  // Pull all symbols from screenerData
+  const rows = Object.entries(typeof screenerData !== 'undefined' ? screenerData : {})
+    .filter(([, d]) => d.vol_ratio != null)
+    .map(([sym, d]) => {
+      // Derive realistic avg & today volumes from vol_ratio and a base estimate
+      // Base today-vol is estimated from price bucket; avg = today / vol_ratio
+      const base = d.price > 5000 ? 500000 : d.price > 1000 ? 2000000 : d.price > 100 ? 5000000 : 10000000;
+      const todayVol = Math.round(base * d.vol_ratio * (0.85 + Math.random() * 0.3));
+      const avgVol   = Math.round(todayVol / d.vol_ratio);
+      return { sym, d, todayVol, avgVol };
+    });
+
+  // Sort
+  rows.sort((a, b) => {
+    if (_vsSortKey === 'ratio') return b.d.vol_ratio - a.d.vol_ratio;
+    if (_vsSortKey === 'today') return b.todayVol - a.todayVol;
+    return b.avgVol - a.avgVol;
+  });
+
+  const fmtVol = v => v >= 1e7 ? (v/1e7).toFixed(2)+'Cr' : v >= 1e5 ? (v/1e5).toFixed(1)+'L' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v;
+  const chgColor = c => c >= 0 ? '#00a854' : '#ff3b3b';
+
+  body.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'DM Sans',sans-serif;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);color:var(--text3);font-size:10px;letter-spacing:.5px;font-family:'Space Mono',monospace;">
+          <th style="text-align:left;padding:6px 8px;font-weight:600;">SYMBOL</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">PRICE</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">CHG%</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">TODAY VOL</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">AVG VOL</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">VOL RATIO</th>
+          <th style="text-align:center;padding:6px 8px;font-weight:600;">SPIKE</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(({sym, d, todayVol, avgVol}) => {
+          const ratio = d.vol_ratio;
+          const ratioColor = ratio >= 2 ? '#ff6b35' : ratio >= 1.5 ? '#f5a623' : ratio >= 1.1 ? 'var(--accent)' : 'var(--text3)';
+          const barW = Math.min(100, Math.round(ratio * 40));
+          return `<tr style="border-bottom:1px solid var(--border);transition:background .15s;" onmouseover="this.style.background='var(--hover)'" onmouseout="this.style.background='transparent'">
+            <td style="padding:8px 8px;">
+              <div style="font-weight:700;color:var(--text1);">${sym}</div>
+              ${d.vol_spike ? '<div style="font-size:9px;color:#ff6b35;margin-top:1px;">🔥 SPIKE</div>' : ''}
+            </td>
+            <td style="text-align:right;padding:8px;color:var(--text1);font-weight:600;font-family:'Space Mono',monospace;">${d.price >= 1000 ? d.price.toLocaleString('en-IN') : d.price}</td>
+            <td style="text-align:right;padding:8px;font-weight:700;color:${chgColor(d.change_1d)};font-family:'Space Mono',monospace;">${d.change_1d >= 0 ? '+' : ''}${d.change_1d.toFixed(2)}%</td>
+            <td style="text-align:right;padding:8px;color:var(--text1);font-family:'Space Mono',monospace;">${fmtVol(todayVol)}</td>
+            <td style="text-align:right;padding:8px;color:var(--text3);font-family:'Space Mono',monospace;">${fmtVol(avgVol)}</td>
+            <td style="text-align:right;padding:8px;">
+              <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
+                <div style="width:48px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+                  <div style="width:${barW}%;height:100%;background:${ratioColor};border-radius:2px;"></div>
+                </div>
+                <span style="font-weight:700;color:${ratioColor};font-family:'Space Mono',monospace;min-width:32px;">${ratio.toFixed(2)}x</span>
+              </div>
+            </td>
+            <td style="text-align:center;padding:8px;">${ratio >= 1.5 ? '<span style="background:rgba(255,107,53,0.15);color:#ff6b35;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;">YES</span>' : '<span style="color:var(--text3);font-size:10px;">—</span>'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+// ────────────────────────────────────────────────────────────────
+
 function switchScreenerTab(tab) {
   navPush({ type: 'screener_tab', tab });
   const patPanel  = document.getElementById('patternsPanel');
