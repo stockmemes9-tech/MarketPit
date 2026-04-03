@@ -5917,94 +5917,6 @@ function renderSettings(page) {
         </div>`).join('')}
       <button onclick="if(confirm('Clear all cached data? Your posts and settings will be deleted.'))clearData()" style="width:100%;margin-top:16px;padding:12px;border-radius:10px;border:1.5px solid var(--red);background:transparent;color:var(--red);font-weight:700;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;">Clear All Data</button>`;
 
-  } else if (page === 'about_tos') {
-    title.textContent = 'TERMS OF SERVICE';
-    el.innerHTML = `
-      <button onclick="renderSettings('about')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
-      <div style="font-size:13px;color:var(--text2);line-height:1.7;display:flex;flex-direction:column;gap:14px;">
-        <div style="font-weight:700;font-size:15px;color:var(--text);">Welcome to MarketPit</div>
-        <p>By using MarketPit, you agree to engage respectfully with our trading community. These terms govern your use of the platform.</p>
-        <div style="font-weight:600;color:var(--text);">Community Rules</div>
-        <p>Do not share false market information, pump-and-dump schemes, or content designed to mislead other traders. All posts must be your own analysis or opinion.</p>
-        <div style="font-weight:600;color:var(--text);">No Financial Advice</div>
-        <p>Content on MarketPit is for educational and community discussion purposes only. Nothing here constitutes professional financial advice. Always do your own research.</p>
-        <div style="font-weight:600;color:var(--text);">Account Responsibility</div>
-        <p>You are responsible for all activity under your account. Do not share credentials or use the platform to spam, harass, or abuse other members.</p>
-        <div style="font-weight:600;color:var(--text);">Paper Trading</div>
-        <p>MarketPit's paper trading feature uses simulated funds only. No real money is involved. Past paper performance does not guarantee real-world results.</p>
-        <div style="padding:14px;background:var(--card);border-radius:10px;border:1px solid var(--border);">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Questions about our Terms?</div>
-          <a href="mailto:marketxpit@gmail.com" style="color:var(--accent);font-weight:600;font-size:13px;text-decoration:none;">marketxpit@gmail.com</a>
-        </div>
-      </div>`;
-
-  } else if (page === 'about_privacy') {
-    title.textContent = 'PRIVACY POLICY';
-    el.innerHTML = `
-      <button onclick="renderSettings('about')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
-      <div style="font-size:13px;color:var(--text2);line-height:1.7;display:flex;flex-direction:column;gap:14px;">
-        <div style="font-weight:700;font-size:15px;color:var(--text);">Your Privacy Matters</div>
-        <p>MarketPit is committed to protecting your data. We collect only what is necessary to run the platform.</p>
-        <div style="font-weight:600;color:var(--text);">Data We Store</div>
-        <p>Your posts, watchlists, paper trading history, and settings are stored locally in your browser using localStorage. We do not transmit this data to any external server.</p>
-        <div style="font-weight:600;color:var(--text);">Market Data</div>
-        <p>Live market data is fetched from public APIs (NSE, Yahoo Finance, RSS feeds). We do not log your data queries or link them to your identity.</p>
-        <div style="font-weight:600;color:var(--text);">No Ads, No Tracking</div>
-        <p>MarketPit does not run ads, does not use third-party trackers, and does not sell your data to anyone — ever.</p>
-        <div style="font-weight:600;color:var(--text);">Cookies</div>
-        <p>We do not use tracking cookies. Any browser storage is used solely to preserve your preferences and local data.</p>
-        <div style="padding:14px;background:var(--card);border-radius:10px;border:1px solid var(--border);">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Privacy concerns? Reach us at</div>
-          <a href="mailto:marketxpit@gmail.com" style="color:var(--accent);font-weight:600;font-size:13px;text-decoration:none;">marketxpit@gmail.com</a>
-        </div>
-      </div>`;
-
-  } else if (page === 'about_bug') {
-    title.textContent = 'REPORT A BUG';
-    el.innerHTML = `
-      <button onclick="renderSettings('about')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
-      <div style="font-size:13px;color:var(--text2);line-height:1.7;display:flex;flex-direction:column;gap:14px;">
-        <div style="font-weight:700;font-size:15px;color:var(--text);">Found a Bug? 🐛</div>
-        <p>We appreciate you taking the time to report issues — it helps us make MarketPit better for everyone in the community.</p>
-        <div style="font-weight:600;color:var(--text);">What to Include</div>
-        <ul style="padding-left:18px;display:flex;flex-direction:column;gap:6px;">
-          <li>A short description of the issue</li>
-          <li>Steps to reproduce it</li>
-          <li>Your device and browser (e.g. Chrome on Android)</li>
-          <li>A screenshot if possible</li>
-        </ul>
-        <div style="padding:16px;background:var(--card);border-radius:10px;border:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
-          <div style="font-weight:600;color:var(--text);font-size:13px;">📧 Email us directly</div>
-          <a href="mailto:marketxpit@gmail.com?subject=MarketPit Bug Report" style="color:var(--accent);font-weight:700;font-size:14px;text-decoration:none;">marketxpit@gmail.com</a>
-          <div style="font-size:11px;color:var(--text3);">Use subject line: <span style="font-family:'Space Mono',monospace;">MarketPit Bug Report</span></div>
-        </div>
-        <p style="font-size:11px;color:var(--text3);">We review all bug reports and aim to respond within 48 hours. Thank you for helping improve MarketPit!</p>
-      </div>`;
-
-  } else if (page === 'about_feature') {
-    title.textContent = 'SUGGEST A FEATURE';
-    el.innerHTML = `
-      <button onclick="renderSettings('about')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
-      <div style="font-size:13px;color:var(--text2);line-height:1.7;display:flex;flex-direction:column;gap:14px;">
-        <div style="font-weight:700;font-size:15px;color:var(--text);">Got an Idea? 💡</div>
-        <p>MarketPit is built by traders, for traders. Your feature suggestions directly shape the roadmap. We read every single one.</p>
-        <div style="font-weight:600;color:var(--text);">Ideas We're Exploring</div>
-        <ul style="padding-left:18px;display:flex;flex-direction:column;gap:6px;">
-          <li>Options chain viewer</li>
-          <li>Advanced screener filters (F&O, SME)</li>
-          <li>Community leaderboards for paper trading</li>
-          <li>Pit-level market sentiment polls</li>
-        </ul>
-        <div style="font-weight:600;color:var(--text);">How to Submit</div>
-        <p>Drop your idea in an email — the more detail, the better. Tell us the problem it solves and how you'd expect it to work.</p>
-        <div style="padding:16px;background:var(--card);border-radius:10px;border:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
-          <div style="font-weight:600;color:var(--text);font-size:13px;">📧 Send your idea to</div>
-          <a href="mailto:marketxpit@gmail.com?subject=MarketPit Feature Suggestion" style="color:var(--accent);font-weight:700;font-size:14px;text-decoration:none;">marketxpit@gmail.com</a>
-          <div style="font-size:11px;color:var(--text3);">Use subject line: <span style="font-family:'Space Mono',monospace;">MarketPit Feature Suggestion</span></div>
-        </div>
-        <p style="font-size:11px;color:var(--text3);">Popular suggestions get prioritized. Thank you for shaping MarketPit!</p>
-      </div>`;
-
   } else if (page === 'about') {
     title.textContent = 'ABOUT';
     el.innerHTML = `
@@ -6015,12 +5927,12 @@ function renderSettings(page) {
         <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:'Space Mono',monospace;">v1.0.0</div>
       </div>
       ${[
-        ['📋','Terms of Service','Community rules and usage','tos'],
-        ['🔒','Privacy Policy','How your data is used','privacy'],
-        ['🐛','Report a Bug','Help improve MarketPit','bug'],
-        ['💡','Suggest a Feature','Share your ideas','feature'],
-      ].map(([icon,label,desc,page]) => `
-        <div onclick="renderSettings('about_${page}')" style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);cursor:pointer;">
+        ['📋','Terms of Service','Community rules and usage'],
+        ['🔒','Privacy Policy','How your data is used'],
+        ['🐛','Report a Bug','Help improve MarketPit'],
+        ['💡','Suggest a Feature','Share your ideas'],
+      ].map(([icon,label,desc]) => `
+        <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);">
           <span style="font-size:18px;">${icon}</span>
           <div style="flex:1;">
             <div style="font-weight:600;font-size:14px;color:var(--text);">${label}</div>
@@ -10004,6 +9916,8 @@ function _mpInit() {
   setTimeout(() => { _fetchCommoditiesLive().catch(()=>{}); }, 3500);
   // Tier 5 (5000ms): full bootstrap — heavy, runs after UI is fully responsive
   setTimeout(() => { _fastBootstrapStocks(); }, 5000);
+  // Tier 5.5 (6000ms): MMI data — fetch real Tickertape score for sidebar gauge
+  setTimeout(() => { _fetchMmiData().then(() => { try { renderSidebarMmi(); } catch(e){} }).catch(()=>{}); }, 6000);
 
   // ── STEP 3: Safety re-renders — update sidebar as data arrives ──
   setTimeout(() => { renderTrending(liveStocks); onLiveDataUpdate(); }, 2000);
@@ -10281,27 +10195,32 @@ async function renderMmi() {
 }
 
 async function _fetchMmiData() {
-  // ── Step 1: Try Tickertape MMI API (most accurate India MMI) ──────
+  // ── Step 1: Try Tickertape MMI API via CORS proxy chain ──────────
   let ttScore = null, ttZone = null, ttSource = false;
-  try {
-    const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), 6000);
-    const ttRes = await fetch('https://api.tickertape.in/market-mood-index/12m', {
-      headers: { 'Accept': 'application/json' },
-      signal: ctrl.signal
-    });
-    clearTimeout(tid);
-    if (ttRes.ok) {
-      const ttData = await ttRes.json();
-      const arr = ttData && ttData.data;
+  const _TT_URL = 'https://api.tickertape.in/market-mood-index/12m';
+  const _TT_PROXIES = [
+    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+    u => `https://thingproxy.freeboard.io/fetch/${u}`,
+  ];
+  for (const proxyFn of _TT_PROXIES) {
+    try {
+      const r = await fetch(proxyFn(_TT_URL), { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) continue;
+      const raw = await r.json();
+      // allorigins wraps response in { contents: "..." }
+      const parsed = raw && raw.contents ? JSON.parse(raw.contents) : raw;
+      const arr = parsed && parsed.data;
       if (arr && arr.length) {
         const latest = arr[arr.length - 1];
         ttScore  = typeof latest.value === 'number' ? Math.round(latest.value) : null;
         ttZone   = latest.classification || null;
         ttSource = ttScore != null;
+        if (ttSource) break; // got a valid score, stop trying proxies
       }
-    }
-  } catch(e) { /* CORS / timeout — fall through to calculated score */ }
+    } catch(e) { continue; }
+  }
 
   // ── Step 2: Fetch supporting market data (VIX, indices) via YF ───
   try {
@@ -10532,9 +10451,13 @@ function _renderMmiHtml(el, data) {
   el.innerHTML = html;
 }
 
-// Auto-refresh MMI every 5 minutes when page is open
+// Auto-refresh MMI every 5 minutes — updates both the MMI page and sidebar gauge
 setInterval(() => {
-  if (window._activePage === 'mmi') { _mmiData = null; renderMmi(); }
+  _mmiData = null;
+  _fetchMmiData().then(() => {
+    try { renderSidebarMmi(); } catch(e) {}
+    if (window._activePage === 'mmi') { try { renderMmi(); } catch(e) {} }
+  }).catch(() => {});
 }, 5 * 60 * 1000);
 
 function renderUnlisted() {
