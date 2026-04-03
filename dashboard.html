@@ -857,10 +857,8 @@ header {
   .mp-drawer { display: none !important; }
   .mp-drawer-overlay { display: none !important; }
   .main-feed     { flex: 1 !important; width: auto !important; }
-  /* Always show inline compose box on desktop */
-  .compose-box   { display: block !important; }
-  /* Never show mobile compose modal on desktop */
-  #mobileComposeModal { display: none !important; }
+  /* compose-box removed — FAB replaces it on all screen sizes */
+  .compose-box   { display: none !important; }
   /* Profile modal — centered fixed width on desktop */
   .profile-modal-box { width:480px; max-width:95vw; }
 }
@@ -1324,24 +1322,6 @@ header {
       <button class="filter-btn" onclick="setFilter(this)">📌 Following</button>
     </div>
     <div class="feed-scroll">
-      <div class="compose-box" style="position:relative;">
-        <div class="compose-row">
-          <div class="avatar" id="composeAv" style="width:36px;height:36px;font-size:11px;flex-shrink:0;">?</div>
-          <textarea class="compose-input" id="composeInput" placeholder="Drop your trade idea, analysis, or market take… (type # for hashtags)"
-            oninput="onComposeInput(this)" onkeydown="onComposeKeydown(event)"></textarea>
-        </div>
-        <!-- Hashtag suggestion popup -->
-        <div class="hashtag-popup" id="hashtagPopup"></div>
-        <!-- Trending hashtag chips -->
-        <div id="trendingTags" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px;"></div>
-        <div class="compose-actions">
-          <span class="pit-tag stocks" onclick="selectPit(this,'Stocks')">+ Stocks</span>
-          <span class="pit-tag crypto" onclick="selectPit(this,'Crypto')">+ Crypto</span>
-          <span class="pit-tag commodities" onclick="selectPit(this,'Commodities')">+ Commodities</span>
-          <span class="pit-tag macro" onclick="selectPit(this,'Macro')">+ Macro</span>
-          <button class="btn-post" onclick="submitPost()">Post to Pit</button>
-        </div>
-      </div>
       <div id="postsContainer"></div>
     </div>
   </div>
@@ -13939,6 +13919,70 @@ function renderHeatmap() {
 
 })();
 </script>
+<!-- ── COMPOSE FAB (floating + button, bottom-right) ── -->
+<style>
+#composeFab {
+  position: fixed;
+  bottom: 28px;
+  right: 24px;
+  z-index: 500;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(0,112,243,0.45), 0 2px 8px rgba(0,0,0,0.25);
+  transition: transform 0.18s cubic-bezier(.34,1.56,.64,1), box-shadow 0.18s ease, background 0.18s ease;
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 300;
+}
+#composeFab:hover {
+  transform: scale(1.12);
+  box-shadow: 0 6px 28px rgba(0,112,243,0.6), 0 3px 12px rgba(0,0,0,0.3);
+}
+#composeFab:active { transform: scale(0.94); }
+/* Nudge above mobile bottom nav */
+@media (max-width: 767px) {
+  #composeFab { bottom: 72px; right: 16px; width: 48px; height: 48px; font-size: 22px; }
+}
+/* Tooltip label */
+#composeFab::after {
+  content: 'Post to Pit';
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) translateX(6px);
+  background: rgba(0,0,0,0.78);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'DM Sans', sans-serif;
+  white-space: nowrap;
+  padding: 5px 10px;
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  letter-spacing: 0.3px;
+}
+#composeFab:hover::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+@media (max-width: 767px) { #composeFab::after { display: none; } }
+</style>
+<button id="composeFab" onclick="openMobileCompose()" aria-label="Post to Pit">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+  </svg>
+</button>
+
 </body>
 </html>
 
