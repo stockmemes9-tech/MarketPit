@@ -2214,9 +2214,17 @@ window.submitMobilePost = function() {
   var input = document.getElementById('mobileComposeInput');
   var main = document.getElementById('composeInput');
   if (main && input) main.value = input.value;
-  if (typeof submitPost === 'function') submitPost();
-  input.value = '';
+  var text = input ? input.value.trim() : '';
+  if (!text) return; // nothing typed — keep modal open
+  // Check login before closing, so user doesn't lose their text
+  if (typeof getUser === 'function' && !getUser()) {
+    if (typeof submitPost === 'function') submitPost(); // opens login modal
+    return;
+  }
+  // User is logged in and has text — close modal then post
   closeMobileCompose();
+  input.value = '';
+  if (typeof submitPost === 'function') submitPost();
 };
 </script>
 
