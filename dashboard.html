@@ -2212,8 +2212,33 @@ window.submitMobilePost = function() {
   <div class="share-option" onclick="shareVia('telegram')">
     <span style="font-size:18px;">✈️</span> Telegram
   </div>
+  <div class="share-option" onclick="shareVia('instagram')">
+    <span style="font-size:18px;">📸</span> Instagram
+  </div>
+  <div class="share-option" onclick="shareVia('native')">
+    <span style="font-size:18px;">↗️</span> More…
+  </div>
   <div class="share-option" onclick="shareVia('copy')">
     <span style="font-size:18px;">📋</span> Copy Text
+  </div>
+</div>
+
+<!-- COMMENT MODAL -->
+<div class="modal-overlay" id="commentModal" onclick="if(event.target===this)closeModal('commentModal')" style="z-index:600;">
+  <div class="modal" style="width:520px;max-width:97vw;max-height:80vh;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+    <div class="modal-header" style="flex-shrink:0;">
+      <span class="modal-title">💬 Comments</span>
+      <button class="modal-close" onclick="closeModal('commentModal')">✕</button>
+    </div>
+    <!-- Original post preview -->
+    <div id="commentPostPreview" style="padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;font-size:13px;color:var(--text2);line-height:1.5;"></div>
+    <!-- Comments list -->
+    <div id="commentsList" style="flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;"></div>
+    <!-- Add comment -->
+    <div style="padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:10px;align-items:flex-end;">
+      <textarea id="commentInput" placeholder="Add your comment…" style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;resize:none;min-height:44px;max-height:100px;outline:none;line-height:1.5;" rows="1" oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
+      <button onclick="submitComment()" style="background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;font-family:'DM Sans',sans-serif;">Post</button>
+    </div>
   </div>
 </div>
 
@@ -4084,7 +4109,7 @@ function renderPosts() {
       <div class="post-text">${highlightHashtags(p.text)}</div>
       <div class="post-footer">
         <button class="post-action ${isLiked?'liked':''}" onclick="likePost(${p.id},this)" ${isLiked?'disabled':''}>↑ <span class="cnt">${p.likes||0}</span></button>
-        <button class="post-action">💬 0</button>
+        <button class="post-action" onclick="openComments(${p.id})">💬 <span>${(getComments()[p.id]||[]).length}</span></button>
         <button class="post-action" onclick="sharePost(${p.id},event)">🔗 Share</button>
         <button class="post-action" onclick="deletePost(${p.id})">🗑️</button>
       </div>
@@ -4107,45 +4132,126 @@ function deletePost(id) {
   renderPosts(); renderLeaderboard();
 }
 
+// ── COMMENTS ──
+function getComments() { try { return JSON.parse(localStorage.getItem('mp_comments')||'{}'); } catch(e) { return {}; } }
+function saveComments(c) { localStorage.setItem('mp_comments', JSON.stringify(c)); }
+
+let _activeCommentPostId = null;
+
+function openComments(postId) {
+  _activeCommentPostId = postId;
+  const post = getPosts().find(p => p.id === postId);
+  if (!post) return;
+  // Show post preview
+  document.getElementById('commentPostPreview').innerHTML = `<span style="font-weight:600;color:var(--text);">${post.author}</span>: ${highlightHashtags(post.text)}`;
+  document.getElementById('commentInput').value = '';
+  renderCommentsList();
+  openModal('commentModal');
+}
+
+function renderCommentsList() {
+  const all = getComments();
+  const list = all[_activeCommentPostId] || [];
+  const el = document.getElementById('commentsList');
+  if (!list.length) {
+    el.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text3);font-size:13px;">No comments yet. Be first to comment!</div>`;
+    return;
+  }
+  el.innerHTML = list.map(c => {
+    const user = getUser();
+    const isMe = user && c.author === user.name;
+    const bg = isMe ? 'var(--accent)' : getColor(c.author);
+    return `<div style="display:flex;gap:10px;align-items:flex-start;">
+      <div style="width:30px;height:30px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;">${c.author.slice(0,2).toUpperCase()}</div>
+      <div style="flex:1;background:var(--bg2);border-radius:10px;padding:8px 12px;">
+        <div style="font-weight:600;font-size:12px;color:var(--text);margin-bottom:2px;">${isMe ? (user.displayName || c.author) : c.author} <span style="font-weight:400;font-size:11px;color:var(--text3);">· ${new Date(c.time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'})}</span></div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.5;">${c.text}</div>
+      </div>
+      ${isMe ? `<button onclick="deleteComment(${_activeCommentPostId},${c.id})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:4px;flex-shrink:0;" title="Delete">🗑️</button>` : ''}
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function submitComment() {
+  const user = getUser();
+  if (!user) { openModal('profileModal'); renderProfileModal(); return; }
+  const input = document.getElementById('commentInput');
+  const text = input.value.trim();
+  if (!text) return;
+  const all = getComments();
+  if (!all[_activeCommentPostId]) all[_activeCommentPostId] = [];
+  all[_activeCommentPostId].push({ id: Date.now(), author: user.name, text, time: new Date().toISOString() });
+  saveComments(all);
+  input.value = '';
+  input.style.height = 'auto';
+  renderCommentsList();
+  renderPosts(); // update comment count in feed
+}
+
+function deleteComment(postId, commentId) {
+  const all = getComments();
+  if (all[postId]) { all[postId] = all[postId].filter(c => c.id !== commentId); saveComments(all); }
+  renderCommentsList();
+  renderPosts();
+}
+
 // ── SHARE ──
 let _shareText = '';
+let _sharePostId = null;
 function sharePost(id, event) {
   event.stopPropagation();
   const post = getPosts().find(p => p.id === id);
   if (!post) return;
-  _shareText = `${post.author} on MarketPit:\n\n"${post.text}"\n\n— MarketPit Trading Community`;
+  _sharePostId = id;
+  _shareText = `${post.author} on MarketPit:\n\n"${post.text}"\n\n— MarketPit Trading Community\nhttps://marketpit.vercel.app`;
 
   const popup = document.getElementById('sharePopup');
   const rect  = event.target.getBoundingClientRect();
   popup.style.display = 'block';
-  popup.style.top  = (rect.bottom + window.scrollY + 6) + 'px';
-  popup.style.left = Math.min(rect.left, window.innerWidth - 200) + 'px';
 
-  // Close on outside click
+  // On mobile, center the popup; on desktop, anchor to button
+  if (window.innerWidth <= 600) {
+    popup.style.top  = '50%';
+    popup.style.left = '50%';
+    popup.style.transform = 'translate(-50%,-50%)';
+  } else {
+    popup.style.transform = '';
+    popup.style.top  = (rect.bottom + window.scrollY + 6) + 'px';
+    popup.style.left = Math.min(rect.left, window.innerWidth - 210) + 'px';
+  }
+
   setTimeout(() => document.addEventListener('click', closeSharePopup, {once:true}), 10);
 }
 
 function closeSharePopup() {
-  document.getElementById('sharePopup').style.display = 'none';
+  const p = document.getElementById('sharePopup');
+  p.style.display = 'none';
+  p.style.transform = '';
 }
 
 function shareVia(platform) {
   closeSharePopup();
   const encoded = encodeURIComponent(_shareText);
   const urls = {
-    whatsapp: `https://wa.me/?text=${encoded}`,
-    twitter:  `https://twitter.com/intent/tweet?text=${encoded}`,
-    telegram: `https://t.me/share/url?url=${encodeURIComponent('https://marketpit.app')}&text=${encoded}`,
+    whatsapp:  `https://wa.me/?text=${encoded}`,
+    twitter:   `https://twitter.com/intent/tweet?text=${encoded}`,
+    telegram:  `https://t.me/share/url?url=${encodeURIComponent('https://marketpit.vercel.app')}&text=${encoded}`,
+    instagram: `https://www.instagram.com/`,  // Instagram doesn't support direct text share via URL; copy text first then open
   };
   if (platform === 'copy') {
-    navigator.clipboard.writeText(_shareText).then(() => {
-      // Show brief toast
-      const toast = document.createElement('div');
-      toast.textContent = '✅ Copied to clipboard!';
-      toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:10px 20px;border-radius:8px;font-weight:700;font-size:13px;z-index:9999;animation:fadeIn 0.2s ease;';
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 2000);
-    });
+    navigator.clipboard.writeText(_shareText).then(() => showToast('✅ Copied to clipboard!', 'var(--green)'));
+  } else if (platform === 'instagram') {
+    // Instagram has no web share URL — copy to clipboard and open Instagram
+    navigator.clipboard.writeText(_shareText).catch(()=>{});
+    showToast('📋 Text copied! Paste it in Instagram.', 'var(--accent)', 3000);
+    setTimeout(() => window.open('https://www.instagram.com/', '_blank'), 1200);
+  } else if (platform === 'native') {
+    if (navigator.share) {
+      navigator.share({ title: 'MarketPit', text: _shareText, url: 'https://marketpit.vercel.app' }).catch(()=>{});
+    } else {
+      navigator.clipboard.writeText(_shareText).then(() => showToast('✅ Copied to clipboard!', 'var(--green)'));
+    }
   } else {
     window.open(urls[platform], '_blank');
   }
@@ -4374,7 +4480,25 @@ function filterByTag(tag) {
 
 function selectPit(el, pit) {
   document.querySelectorAll('.pit-tag').forEach(t=>t.classList.remove('active-pit'));
-  if (_selectedPit === pit) { _selectedPit=''; } else { _selectedPit=pit; el.classList.add('active-pit'); }
+  if (_selectedPit === pit) {
+    _selectedPit='';
+    // Deselect: revert feed to All Markets
+    _currentFilter='';
+    document.querySelectorAll('.pit-item').forEach(i=>i.classList.remove('active'));
+    const allEl = document.querySelector('.pit-item');
+    if (allEl) allEl.classList.add('active');
+  } else {
+    _selectedPit=pit;
+    el.classList.add('active-pit');
+    // Sync feed filter to match selected pit
+    _currentFilter = pit;
+    document.querySelectorAll('.pit-item').forEach(i=>i.classList.remove('active'));
+    document.querySelectorAll('.pit-item').forEach(i=>{
+      const nm = i.querySelector('.pit-name');
+      if (nm && nm.textContent.trim().toLowerCase().includes(pit.toLowerCase())) i.classList.add('active');
+    });
+  }
+  renderPosts();
 }
 
 function filterFeed(pit, el) {
