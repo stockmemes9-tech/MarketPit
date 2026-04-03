@@ -2090,6 +2090,17 @@ function onMobileSearchInput(val) {
 }
 </script>
 
+<!--
+  Hidden backing elements for submitPost() / hashtag popup / composeAv sync.
+  The visible compose-box was removed and replaced by the FAB+bottom-sheet,
+  but all JS still reads/writes these IDs. Keep them out of the visual flow.
+-->
+<div style="display:none;visibility:hidden;position:absolute;pointer-events:none;" aria-hidden="true">
+  <div id="composeAv">?</div>
+  <textarea id="composeInput" class="compose-input"></textarea>
+  <div id="trendingTags"></div>
+</div>
+
 <!-- MOBILE COMPOSE MODAL (Twitter-style bottom sheet) -->
 <div id="mobileComposeModal" onclick="if(event.target===this)closeMobileCompose()">
   <div class="mobile-compose-sheet" onclick="event.stopPropagation()">
