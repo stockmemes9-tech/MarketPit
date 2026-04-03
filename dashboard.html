@@ -6940,16 +6940,22 @@ function renderVolumeShockers() {
   const body = document.getElementById('volumeShockersBody');
   if (!body) return;
 
-  // Pull all symbols from screenerData
-  const rows = Object.entries(typeof screenerData !== 'undefined' ? screenerData : {})
+  // Pull all symbols from STATIC_TECH (the actual data store)
+  const rows = Object.entries(typeof STATIC_TECH !== 'undefined' ? STATIC_TECH : {})
     .filter(([, d]) => d.vol_ratio != null)
     .map(([sym, d]) => {
-      // Derive realistic avg & today volumes from vol_ratio and a base estimate
-      // Base today-vol is estimated from price bucket; avg = today / vol_ratio
-      const base = d.price > 5000 ? 500000 : d.price > 1000 ? 2000000 : d.price > 100 ? 5000000 : 10000000;
-      const todayVol = Math.round(base * d.vol_ratio * (0.85 + Math.random() * 0.3));
+      // Use live price if available, fallback to STATIC_TECH price
+      const live = (typeof liveStocks !== 'undefined' && liveStocks.find(x => x.sym === sym)) || {};
+      const price = live.price || d.price || 100;
+      const change1d = live.chg != null ? live.chg : (d.change_1d != null ? d.change_1d : 0);
+      // Derive stable avg & today volumes from vol_ratio + price bucket
+      // Use a deterministic jitter seeded from symbol to avoid flicker on re-render
+      const seed = sym.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xffff, 0);
+      const jitter = 0.85 + (seed % 100) / 333; // stable 0.85–1.15
+      const base = price > 5000 ? 500000 : price > 1000 ? 2000000 : price > 100 ? 5000000 : 10000000;
+      const todayVol = Math.round(base * d.vol_ratio * jitter);
       const avgVol   = Math.round(todayVol / d.vol_ratio);
-      return { sym, d, todayVol, avgVol };
+      return { sym, d: {...d, price, change_1d: change1d}, todayVol, avgVol };
     });
 
   // Sort
@@ -11222,16 +11228,7 @@ function switchPredictTab(tab, btn) {
 // ── PREDICTION LEADERBOARD DATA ──────────────────────────────────
 var _predictLb = JSON.parse(localStorage.getItem('mp_predictLb') || 'null');
 if (!_predictLb) {
-  _predictLb = [
-    {name:'RohitK',    wins:14, bets:18, profit:4820, streak:5, avatar:'RK'},
-    {name:'PriyaS',    wins:11, bets:15, profit:3140, streak:3, avatar:'PS'},
-    {name:'NikhilT',   wins:9,  bets:13, profit:2560, streak:2, avatar:'NT'},
-    {name:'AnanyaM',   wins:8,  bets:12, profit:1980, streak:4, avatar:'AM'},
-    {name:'VikasSh',   wins:7,  bets:11, profit:1620, streak:1, avatar:'VS'},
-    {name:'SnehaR',    wins:6,  bets:10, profit:1240, streak:2, avatar:'SR'},
-    {name:'ArjunP',    wins:5,  bets:9,  profit:980,  streak:0, avatar:'AP'},
-    {name:'KajalB',    wins:4,  bets:8,  profit:720,  streak:1, avatar:'KB'},
-  ];
+  _predictLb = [];
   localStorage.setItem('mp_predictLb', JSON.stringify(_predictLb));
 }
 function _updateLbFromBets() {
@@ -11517,10 +11514,10 @@ function renderPredict() {
       +'<div style="font-size:9px;color:var(--green);font-weight:700;font-family:\'Space Mono\',monospace;">● LIVE</div></div>'
       // My card
       + myBannerHtml
-      // Top 3 podium
-      +'<div style="display:flex;gap:8px;margin-bottom:16px;align-items:flex-end;">' + topHtml + '</div>'
-      // Rest of list
-      + listHtml
+      // Podium + list, or empty state
+      + (_predictLb.length === 0
+        ? '<div style="text-align:center;padding:40px 16px;color:var(--text3);"><div style="font-size:36px;margin-bottom:12px;">🏆</div><div style="font-size:14px;font-weight:700;color:var(--text2);margin-bottom:6px;">No predictions yet</div><div style="font-size:12px;">Be the first to place a bet and top the leaderboard!</div></div>'
+        : '<div style="display:flex;gap:8px;margin-bottom:16px;align-items:flex-end;">' + topHtml + '</div>' + listHtml)
       // Footer note
       +'<div style="text-align:center;padding:16px 0 4px;font-size:10px;color:var(--text3);">Leaderboard updates automatically when markets resolve · Season resets monthly</div>';
   }
