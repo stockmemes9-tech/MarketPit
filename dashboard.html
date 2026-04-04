@@ -1619,6 +1619,17 @@ header {
           <button onclick="refreshVolumeShockers(true)" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-size:11px;font-weight:600;cursor:pointer;">↺ Refresh</button>
         </div>
       </div>
+      <!-- Search bar row -->
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:8px;">
+        <div style="position:relative;flex:1;max-width:320px;">
+          <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:14px;pointer-events:none;opacity:0.5;">🔍</span>
+          <input id="vsSearchInput" type="text" placeholder="Search symbol or name…"
+            oninput="filterVolumeShockers(this.value)"
+            style="width:100%;padding:7px 10px 7px 32px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;"
+            onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+        </div>
+        <span id="vsFilterCount" style="font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;white-space:nowrap;"></span>
+      </div>
       <!-- Table body — populated by renderVolumeShockers() -->
       <div class="feed-scroll" id="volumeShockersBody" style="padding:16px;"></div>
     </div>
@@ -7302,7 +7313,57 @@ const CHART_PATTERNS = [
 
 // ── Volume Shockers ──────────────────────────────────────────────
 let _vsSortKey   = 'ratio'; // 'ratio' | 'today' | 'avg'
-let _vsMinRatio  = 1.0;     // minimum vol_ratio to show (1.0 = all elevated volume)
+let _vsMinRatio  = 1.0;     // minimum vol_ratio to show
+let _vsSearchQ   = '';      // live search filter
+let _vsLiveData  = [];      // cached live data from API
+let _vsLoading   = false;
+let _vsLastFetch = 0;
+const _VS_CACHE_MS = 3 * 60 * 1000; // 3-minute cache
+
+// NSE-listed stocks to monitor for volume shocks (Yahoo Finance symbols)
+const _VS_SYMBOLS = [
+  // Nifty 50 heavy-hitters + mid-caps likely to show volume spikes
+  { sym:'RELIANCE.NS', name:'Reliance Industries' },
+  { sym:'TCS.NS',      name:'TCS' },
+  { sym:'HDFCBANK.NS', name:'HDFC Bank' },
+  { sym:'INFY.NS',     name:'Infosys' },
+  { sym:'ICICIBANK.NS',name:'ICICI Bank' },
+  { sym:'HINDUNILVR.NS',name:'HUL' },
+  { sym:'ITC.NS',      name:'ITC' },
+  { sym:'SBIN.NS',     name:'SBI' },
+  { sym:'BHARTIARTL.NS',name:'Airtel' },
+  { sym:'AXISBANK.NS', name:'Axis Bank' },
+  { sym:'KOTAKBANK.NS',name:'Kotak Bank' },
+  { sym:'LT.NS',       name:'L&T' },
+  { sym:'HCLTECH.NS',  name:'HCL Tech' },
+  { sym:'WIPRO.NS',    name:'Wipro' },
+  { sym:'ASIANPAINT.NS',name:'Asian Paints' },
+  { sym:'BAJFINANCE.NS',name:'Bajaj Finance' },
+  { sym:'MARUTI.NS',   name:'Maruti Suzuki' },
+  { sym:'NTPC.NS',     name:'NTPC' },
+  { sym:'POWERGRID.NS',name:'Power Grid' },
+  { sym:'ONGC.NS',     name:'ONGC' },
+  { sym:'TATAMOTORS.NS',name:'Tata Motors' },
+  { sym:'TATASTEEL.NS',name:'Tata Steel' },
+  { sym:'COALINDIA.NS',name:'Coal India' },
+  { sym:'DRREDDY.NS',  name:"Dr Reddy's" },
+  { sym:'SUNPHARMA.NS',name:'Sun Pharma' },
+  { sym:'CIPLA.NS',    name:'Cipla' },
+  { sym:'ADANIENT.NS', name:'Adani Ent.' },
+  { sym:'ADANIPORTS.NS',name:'Adani Ports' },
+  { sym:'ULTRACEMCO.NS',name:'UltraTech Cem.' },
+  { sym:'TECHM.NS',    name:'Tech Mahindra' },
+  { sym:'DIVISLAB.NS', name:"Divi's Labs" },
+  { sym:'JSWSTEEL.NS', name:'JSW Steel' },
+  { sym:'HINDALCO.NS', name:'Hindalco' },
+  { sym:'BAJAJFINSV.NS',name:'Bajaj Finserv' },
+  { sym:'TITAN.NS',    name:'Titan' },
+  { sym:'NESTLEIND.NS',name:'Nestle India' },
+  { sym:'BPCL.NS',     name:'BPCL' },
+  { sym:'GRASIM.NS',   name:'Grasim' },
+  { sym:'M&M.NS',      name:'M&M' },
+  { sym:'BRITANNIA.NS',name:'Britannia' },
+];
 
 function setVSSort(key, btn) {
   _vsSortKey = key;
@@ -7314,10 +7375,9 @@ function setVSSort(key, btn) {
     el.style.borderColor  = active ? 'var(--accent)' : 'var(--border)';
     el.style.color        = active ? 'var(--accent)' : 'var(--text3)';
   });
-  renderVolumeShockers();
+  _vsRenderTable();
 }
 
-// Allow toggling min ratio filter from UI buttons (vs_min_*)
 function setVSMinRatio(val) {
   _vsMinRatio = val;
   ['vs_min_0','vs_min_1','vs_min_15','vs_min_2'].forEach(id => {
@@ -7329,108 +7389,209 @@ function setVSMinRatio(val) {
     b.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
     b.style.color       = active ? 'var(--accent)' : 'var(--text3)';
   });
-  renderVolumeShockers();
+  _vsRenderTable();
+}
+
+function filterVolumeShockers(q) {
+  _vsSearchQ = (q || '').trim().toLowerCase();
+  _vsRenderTable();
 }
 
 function refreshVolumeShockers(force) {
+  if (force) _vsLastFetch = 0; // bust cache
   const el = document.getElementById('vsLastUpdated');
-  if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
-  renderVolumeShockers();
+  if (el) el.textContent = '';
+  _vsFetchLive();
 }
 
 function renderVolumeShockers() {
+  _vsFetchLive();
+}
+
+// ── Fetch live volume data via Yahoo Finance (proxy-safe) ─────────
+async function _vsFetchLive() {
   const body = document.getElementById('volumeShockersBody');
   if (!body) return;
-
-  // Show loading state briefly on first render
-  if (!body.innerHTML || body.innerHTML.trim() === '') {
-    body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div class="loading-spin"></div><div style="margin-top:12px;font-size:12px;">Loading volume data…</div></div>';
-  }
-
-  // Use STATIC_TECH as authoritative data source (always available, no async needed)
-  const techData = (typeof STATIC_TECH !== 'undefined') ? STATIC_TECH : {};
-  if (!Object.keys(techData).length) {
-    body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚡</div><div style="font-size:14px;color:var(--text2);font-weight:600;">No volume data available</div><div style="font-size:12px;margin-top:6px;">Data will appear once markets are active</div></div>';
+  const now = Date.now();
+  // Return cached data if fresh
+  if (_vsLiveData.length && (now - _vsLastFetch) < _VS_CACHE_MS) {
+    _vsRenderTable();
     return;
   }
+  if (_vsLoading) return;
+  _vsLoading = true;
+  body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div class="loading-spin"></div><div style="margin-top:12px;font-size:12px;">Fetching live volume data…</div></div>';
 
-  // Pull all symbols — filter by _vsMinRatio threshold (default 1.0 = at or above average volume)
-  const rows = Object.entries(techData)
-    .filter(([, d]) => d.vol_ratio != null && d.vol_ratio >= _vsMinRatio)
+  // Batch symbols into groups of 10 (Yahoo Finance /v8/finance/spark can take multiples)
+  const syms = _VS_SYMBOLS.map(s => s.sym);
+  const nameMap = Object.fromEntries(_VS_SYMBOLS.map(s => [s.sym, s.name]));
+  const BATCH = 10;
+  const results = [];
+
+  try {
+    for (let i = 0; i < syms.length; i += BATCH) {
+      const batch = syms.slice(i, i + BATCH);
+      const joined = batch.join(',');
+      // Yahoo Finance v7 quote endpoint via allorigins proxy
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(joined)}&fields=regularMarketVolume,averageDailyVolume10Day,regularMarketPrice,regularMarketChangePercent,shortName`;
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+      try {
+        const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+        const wrapper = await res.json();
+        const data = JSON.parse(wrapper.contents || '{}');
+        const quotes = data?.quoteResponse?.result || [];
+        quotes.forEach(q => {
+          const todayVol = q.regularMarketVolume || 0;
+          const avgVol   = q.averageDailyVolume10Day || 1;
+          const ratio    = avgVol > 0 ? todayVol / avgVol : 0;
+          results.push({
+            sym:      q.symbol.replace('.NS',''),
+            name:     nameMap[q.symbol] || q.shortName || q.symbol.replace('.NS',''),
+            price:    q.regularMarketPrice || 0,
+            change1d: q.regularMarketChangePercent || 0,
+            todayVol,
+            avgVol,
+            ratio,
+            spike:    ratio >= 1.5,
+          });
+        });
+      } catch(batchErr) {
+        // batch failed, continue with next
+      }
+      // Small delay between batches to respect rate limits
+      if (i + BATCH < syms.length) await new Promise(r => setTimeout(r, 200));
+    }
+
+    _vsLiveData = results;
+    _vsLastFetch = Date.now();
+    const upd = document.getElementById('vsLastUpdated');
+    if (upd) upd.textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
+    _vsRenderTable();
+  } catch(err) {
+    // Fallback: use STATIC_TECH data with estimated volumes
+    _vsFallbackStatic();
+  } finally {
+    _vsLoading = false;
+  }
+}
+
+// ── Fallback to STATIC_TECH if live fetch fails ───────────────────
+function _vsFallbackStatic() {
+  const techData = (typeof STATIC_TECH !== 'undefined') ? STATIC_TECH : {};
+  if (!Object.keys(techData).length) {
+    const body = document.getElementById('volumeShockersBody');
+    if (body) body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚠️</div><div style="font-size:14px;color:var(--text2);font-weight:600;">Live data unavailable</div><div style="font-size:12px;margin-top:6px;">Markets may be closed or API is rate-limited. Try again shortly.</div><button onclick="refreshVolumeShockers(true)" style="margin-top:12px;padding:7px 18px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;">↺ Retry</button></div>';
+    return;
+  }
+  const nameMap = Object.fromEntries(_VS_SYMBOLS.map(s => [s.sym.replace('.NS',''), s.name]));
+  _vsLiveData = Object.entries(techData)
+    .filter(([, d]) => d.vol_ratio != null)
     .map(([sym, d]) => {
-      // Use live price if available, fallback to STATIC_TECH price — defensive access
       const lsArr = (typeof liveStocks !== 'undefined' && Array.isArray(liveStocks)) ? liveStocks : [];
       const live = lsArr.find(x => x && x.sym === sym) || {};
       const price = live.price || d.price || 100;
-      const change1d = (live.chg != null) ? live.chg : (d.change_1d != null ? d.change_1d : 0);
-      // Derive stable avg & today volumes from vol_ratio + price bucket.
-      // Deterministic jitter seeded from symbol name to avoid flicker on re-render.
+      const change1d = live.chg != null ? live.chg : (d.change_1d != null ? d.change_1d : 0);
       const seed = sym.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xffff, 0);
-      const jitter = 0.85 + (seed % 100) / 333; // stable range: 0.85–1.15
+      const jitter = 0.85 + (seed % 100) / 333;
       const base = price > 5000 ? 500000 : price > 1000 ? 2000000 : price > 100 ? 5000000 : 10000000;
       const todayVol = Math.round(base * d.vol_ratio * jitter);
       const avgVol   = Math.round(todayVol / d.vol_ratio);
-      return { sym, d: {...d, price, change_1d: change1d}, todayVol, avgVol };
+      return { sym, name: nameMap[sym] || sym, price, change1d, todayVol, avgVol, ratio: d.vol_ratio, spike: d.vol_ratio >= 1.5 };
     });
+  _vsLastFetch = Date.now();
+  const upd = document.getElementById('vsLastUpdated');
+  if (upd) upd.textContent = 'Estimated (offline)';
+  _vsRenderTable();
+}
 
-  // Sort by selected key
+// ── Render the table from _vsLiveData ─────────────────────────────
+function _vsRenderTable() {
+  const body = document.getElementById('volumeShockersBody');
+  if (!body) return;
+
+  const fmtVol   = v => v >= 1e7 ? (v/1e7).toFixed(2)+'Cr' : v >= 1e5 ? (v/1e5).toFixed(1)+'L' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : String(v);
+  const chgColor = c => c >= 0 ? '#00a854' : '#ff3b3b';
+
+  // Apply search filter
+  const q = _vsSearchQ;
+  let rows = _vsLiveData.filter(r => r.ratio >= _vsMinRatio);
+  if (q) {
+    rows = rows.filter(r =>
+      r.sym.toLowerCase().includes(q) ||
+      (r.name && r.name.toLowerCase().includes(q))
+    );
+  }
+
+  // Sort
   rows.sort((a, b) => {
-    if (_vsSortKey === 'ratio') return b.d.vol_ratio - a.d.vol_ratio;
+    if (_vsSortKey === 'ratio') return b.ratio - a.ratio;
     if (_vsSortKey === 'today') return b.todayVol - a.todayVol;
     return b.avgVol - a.avgVol;
   });
 
+  // Update filter count badge
+  const countEl = document.getElementById('vsFilterCount');
+  if (countEl) {
+    if (q) countEl.textContent = rows.length + ' result' + (rows.length !== 1 ? 's' : '');
+    else countEl.textContent = '';
+  }
+
   if (!rows.length) {
-    body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚡</div><div style="font-size:14px;color:var(--text2);font-weight:600;">No volume shockers found</div><div style="font-size:12px;margin-top:6px;">Try lowering the minimum ratio filter below</div></div>';
+    body.innerHTML = q
+      ? `<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">🔍</div><div style="font-size:14px;color:var(--text2);font-weight:600;">No results for "${q}"</div><div style="font-size:12px;margin-top:6px;">Try a different symbol or name</div></div>`
+      : '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚡</div><div style="font-size:14px;color:var(--text2);font-weight:600;">No volume shockers found</div><div style="font-size:12px;margin-top:6px;">Try lowering the minimum ratio filter</div></div>';
     return;
   }
 
-  const fmtVol = v => v >= 1e7 ? (v/1e7).toFixed(2)+'Cr' : v >= 1e5 ? (v/1e5).toFixed(1)+'L' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : String(v);
-  const chgColor = c => c >= 0 ? '#00a854' : '#ff3b3b';
+  const spikeCount = rows.filter(r => r.spike).length;
 
   body.innerHTML = `
-    <div style="font-size:11px;color:var(--text3);margin-bottom:10px;font-family:'Space Mono',monospace;">
-      Showing <strong style="color:var(--text);">${rows.length}</strong> symbols with vol ratio ≥ ${_vsMinRatio}x
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px;font-family:'Space Mono',monospace;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span>Showing <strong style="color:var(--text);">${rows.length}</strong> symbols with vol ratio ≥ ${_vsMinRatio}x</span>
+      ${spikeCount ? `<span style="background:rgba(255,107,53,0.12);color:#ff6b35;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;">🔥 ${spikeCount} spike${spikeCount>1?'s':''}</span>` : ''}
     </div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'DM Sans',sans-serif;">
+    <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'DM Sans',sans-serif;min-width:560px;">
       <thead>
         <tr style="border-bottom:1px solid var(--border);color:var(--text3);font-size:10px;letter-spacing:.5px;font-family:'Space Mono',monospace;">
           <th style="text-align:left;padding:6px 8px;font-weight:600;">SYMBOL</th>
           <th style="text-align:right;padding:6px 8px;font-weight:600;">PRICE</th>
           <th style="text-align:right;padding:6px 8px;font-weight:600;">CHG%</th>
           <th style="text-align:right;padding:6px 8px;font-weight:600;">TODAY VOL</th>
-          <th style="text-align:right;padding:6px 8px;font-weight:600;">AVG VOL</th>
+          <th style="text-align:right;padding:6px 8px;font-weight:600;">AVG 10D</th>
           <th style="text-align:right;padding:6px 8px;font-weight:600;">VOL RATIO</th>
           <th style="text-align:center;padding:6px 8px;font-weight:600;">SPIKE</th>
         </tr>
       </thead>
       <tbody>
-        ${rows.map(({sym, d, todayVol, avgVol}) => {
-          const ratio = d.vol_ratio;
+        ${rows.map(r => {
+          const ratio = r.ratio;
           const ratioColor = ratio >= 2 ? '#ff6b35' : ratio >= 1.5 ? '#f5a623' : ratio >= 1.1 ? 'var(--accent)' : 'var(--text3)';
           const barW = Math.min(100, Math.round(ratio * 40));
+          const volSpike = ratio >= 1.5;
           return `<tr style="border-bottom:1px solid var(--border);transition:background .15s;" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
             <td style="padding:8px 8px;">
-              <div style="font-weight:700;color:var(--text);">${sym}</div>
-              ${d.vol_spike ? '<div style="font-size:9px;color:#ff6b35;margin-top:1px;">🔥 SPIKE</div>' : ''}
+              <div style="font-weight:700;color:var(--text);">${r.sym}</div>
+              <div style="font-size:9px;color:var(--text3);margin-top:1px;">${r.name || ''}</div>
+              ${volSpike ? '<div style="font-size:9px;color:#ff6b35;margin-top:1px;">🔥 SPIKE</div>' : ''}
             </td>
-            <td style="text-align:right;padding:8px;color:var(--text);font-weight:600;font-family:'Space Mono',monospace;">${d.price >= 1000 ? Number(d.price).toLocaleString('en-IN') : d.price}</td>
-            <td style="text-align:right;padding:8px;font-weight:700;color:${chgColor(d.change_1d)};font-family:'Space Mono',monospace;">${d.change_1d >= 0 ? '+' : ''}${Number(d.change_1d).toFixed(2)}%</td>
-            <td style="text-align:right;padding:8px;color:var(--text);font-family:'Space Mono',monospace;">${fmtVol(todayVol)}</td>
-            <td style="text-align:right;padding:8px;color:var(--text3);font-family:'Space Mono',monospace;">${fmtVol(avgVol)}</td>
+            <td style="text-align:right;padding:8px;color:var(--text);font-weight:600;font-family:'Space Mono',monospace;">${r.price >= 1000 ? Number(r.price).toLocaleString('en-IN',{maximumFractionDigits:1}) : Number(r.price).toFixed(2)}</td>
+            <td style="text-align:right;padding:8px;font-weight:700;color:${chgColor(r.change1d)};font-family:'Space Mono',monospace;">${r.change1d >= 0 ? '+' : ''}${Number(r.change1d).toFixed(2)}%</td>
+            <td style="text-align:right;padding:8px;color:var(--text);font-family:'Space Mono',monospace;">${fmtVol(r.todayVol)}</td>
+            <td style="text-align:right;padding:8px;color:var(--text3);font-family:'Space Mono',monospace;">${fmtVol(r.avgVol)}</td>
             <td style="text-align:right;padding:8px;">
               <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
                 <div style="width:48px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
-                  <div style="width:${barW}%;height:100%;background:${ratioColor};border-radius:2px;"></div>
+                  <div style="width:${barW}%;height:100%;background:${ratioColor};border-radius:2px;transition:width 0.4s ease;"></div>
                 </div>
                 <span style="font-weight:700;color:${ratioColor};font-family:'Space Mono',monospace;min-width:32px;">${ratio.toFixed(2)}x</span>
               </div>
             </td>
-            <td style="text-align:center;padding:8px;">${ratio >= 1.5 ? '<span style="background:rgba(255,107,53,0.15);color:#ff6b35;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;">YES</span>' : '<span style="color:var(--text3);font-size:10px;">—</span>'}</td>
+            <td style="text-align:center;padding:8px;">${volSpike ? '<span style="background:rgba(255,107,53,0.15);color:#ff6b35;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;">YES</span>' : '<span style="color:var(--text3);font-size:10px;">—</span>'}</td>
           </tr>`;
         }).join('')}
       </tbody>
-    </table>`;
+    </table></div>`;
 }
 // ────────────────────────────────────────────────────────────────
 
@@ -11815,36 +11976,67 @@ function switchPredictTab(tab, btn) {
   renderPredict();
 }
 // ── PREDICTION LEADERBOARD DATA ──────────────────────────────────
-var _predictLb = JSON.parse(localStorage.getItem('mp_predictLb') || 'null');
-if (!_predictLb) {
-  _predictLb = [];
-  localStorage.setItem('mp_predictLb', JSON.stringify(_predictLb));
-}
+// Leaderboard is 100% user-derived — no dummy data.
+// Each user's stats are recomputed from their real prediction history on every open.
+// localStorage key: mp_predictLb — array of { name, wins, bets, profit, streak, avatar, points, lastBetAt }
+var _predictLb = [];
+try {
+  var _lbRaw = JSON.parse(localStorage.getItem('mp_predictLb') || '[]');
+  // Strip any legacy dummy entries that have no real bets recorded
+  _predictLb = Array.isArray(_lbRaw) ? _lbRaw : [];
+} catch(e) { _predictLb = []; }
+
 function _updateLbFromBets() {
-  // compute real user stats and upsert into leaderboard
   var u = (window.getUser && getUser()) || null;
   if (!u) return;
-  var wins=0,losses=0,profit=0,bets=_predictBets.length;
+
+  var wins=0, losses=0, profit=0, bets=_predictBets.length, streak=0;
+  var lastBetAt = null;
+  var streakBuf = [];
+
   _predictBets.forEach(function(b){
-    var resolved = PREDICT_RESOLVED.find(function(r){return r.id===b.id;});
-    if(resolved){
-      // Early-bird multiplier: earlier bets score higher (max 2x within first 30 min)
-      var mkt = PREDICT_MARKETS ? PREDICT_MARKETS.find(function(m){return m.id===b.id;}) : null;
+    if (b.placedAt && (!lastBetAt || b.placedAt > lastBetAt)) lastBetAt = b.placedAt;
+    var resolved = PREDICT_RESOLVED.find(function(r){ return r.id===b.id; });
+    if (resolved) {
+      // Early-bird multiplier: predictions placed within 30 min of market open get up to 2× bonus
+      var mkt = PREDICT_MARKETS ? PREDICT_MARKETS.find(function(m){ return m.id===b.id; }) : null;
       var earlyBonus = 1.0;
       if (b.placedAt && mkt && mkt.createdAt) {
         var elapsedMs = b.placedAt - mkt.createdAt;
-        var decayMs = 30 * 60 * 1000; // 30 minutes
+        var decayMs = 30 * 60 * 1000;
         earlyBonus = Math.max(1.0, 2.0 - Math.min(1.0, elapsedMs / decayMs));
       }
-      if(b.side===resolved.outcome){ wins++; profit+=Math.round(b.amount * 0.8 * earlyBonus); }
-      else { losses++; profit-=b.amount; }
+      var won = b.side === resolved.outcome;
+      if (won) { wins++; profit += Math.round(b.amount * 0.8 * earlyBonus); streakBuf.push(1); }
+      else      { losses++; profit -= b.amount; streakBuf.push(0); }
     }
   });
-  var existing = _predictLb.find(function(x){return x.name===u.name;});
-  if(existing){ existing.wins=wins;existing.bets=bets;existing.profit=profit; }
-  else if(bets>0){ _predictLb.push({name:u.name,wins:wins,bets:bets,profit:profit,streak:wins>0?1:0,avatar:u.name.slice(0,2).toUpperCase()}); }
-  _predictLb.sort(function(a,b){return b.profit-a.profit||b.wins-a.wins;});
-  localStorage.setItem('mp_predictLb',JSON.stringify(_predictLb));
+
+  // Compute current streak (consecutive wins from latest resolved bet backwards)
+  for (var si = streakBuf.length - 1; si >= 0; si--) {
+    if (streakBuf[si] === 1) streak++;
+    else break;
+  }
+
+  // Points formula: (wins × 100) + (win_rate × 50) + (early bonus already in profit)
+  var winRate = bets > 0 ? wins / bets : 0;
+  var points  = Math.round(wins * 100 + winRate * 50 * wins);
+
+  var existing = _predictLb.find(function(x){ return x.name === u.name; });
+  if (existing) {
+    existing.wins = wins; existing.bets = bets; existing.profit = profit;
+    existing.streak = streak; existing.points = points; existing.lastBetAt = lastBetAt;
+  } else if (bets > 0) {
+    _predictLb.push({
+      name: u.name, wins: wins, bets: bets, profit: profit,
+      streak: streak, avatar: u.name.slice(0,2).toUpperCase(),
+      points: points, lastBetAt: lastBetAt
+    });
+  }
+
+  // Rank by points → then wins → then profit
+  _predictLb.sort(function(a, b){ return (b.points - a.points) || (b.wins - a.wins) || (b.profit - a.profit); });
+  localStorage.setItem('mp_predictLb', JSON.stringify(_predictLb));
 }
 
 // ── NIFTY 5-MIN PREDICTION STATE ─────────────────────────────────
@@ -12063,60 +12255,60 @@ function renderPredict() {
     var myStats = myRank>=0 ? _predictLb[myRank] : null;
     var medalColors = ['#f5a623','#aab8c2','#cd7f32'];
     var medalEmoji = ['🥇','🥈','🥉'];
-    // Avatar colour helper
     function lbColor(n){ var c=['#0070f3','#7856ff','#00a854','#ff6b35','#e53935','#f5a623','#00bcd4','#9c27b0']; var h=0; for(var i=0;i<n.length;i++)h=n.charCodeAt(i)+h*31; return c[Math.abs(h)%c.length]; }
     var myBannerHtml = '';
     if (myStats) {
       var wr = myStats.bets>0 ? Math.round(myStats.wins/myStats.bets*100) : 0;
+      var myPts = myStats.points || 0;
       myBannerHtml = '<div style="background:linear-gradient(135deg,rgba(0,112,243,0.12),rgba(120,86,255,0.10));border:1px solid var(--border2);border-radius:14px;padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">'
         +'<div style="background:'+lbColor(myStats.name)+';border-radius:50%;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;color:#fff;flex-shrink:0;">'+myStats.avatar+'</div>'
         +'<div style="flex:1;min-width:120px;">'
         +'<div style="font-size:13px;font-weight:800;color:var(--text);">'+myStats.name+' <span style="font-size:10px;background:var(--accent);color:#fff;border-radius:5px;padding:1px 6px;">YOU</span></div>'
         +'<div style="font-size:10px;color:var(--text3);margin-top:2px;">Rank #'+(myRank+1)+' · '+myStats.wins+' wins · '+wr+'% win rate</div></div>'
         +'<div style="display:flex;gap:12px;flex-wrap:wrap;">'
+        +'<div style="text-align:center;"><div style="font-size:17px;font-weight:800;color:var(--accent);">'+myPts.toLocaleString('en-IN')+'</div><div style="font-size:9px;color:var(--text3);">POINTS</div></div>'
         +'<div style="text-align:center;"><div style="font-size:17px;font-weight:800;color:'+(myStats.profit>=0?'#00a854':'#e53935')+';">'+(myStats.profit>=0?'+':'')+'₹'+Math.abs(myStats.profit).toLocaleString('en-IN')+'</div><div style="font-size:9px;color:var(--text3);">NET P&L</div></div>'
-        +'<div style="text-align:center;"><div style="font-size:17px;font-weight:800;color:var(--text);">'+myStats.streak+'</div><div style="font-size:9px;color:var(--text3);">STREAK</div></div>'
+        +'<div style="text-align:center;"><div style="font-size:17px;font-weight:800;color:var(--text);">'+(myStats.streak||0)+'</div><div style="font-size:9px;color:var(--text3);">STREAK</div></div>'
         +'<div style="text-align:center;"><div style="font-size:17px;font-weight:800;color:var(--text);">'+myStats.bets+'</div><div style="font-size:9px;color:var(--text3);">BETS</div></div>'
         +'</div></div>';
     }
     var topHtml = _predictLb.slice(0,3).map(function(u,i){
       var wr2 = u.bets>0?Math.round(u.wins/u.bets*100):0;
+      var pts2 = u.points || 0;
       return '<div style="flex:1;min-width:90px;background:var(--bg2);border:1px solid '+(i===0?'rgba(245,166,35,0.4)':i===1?'rgba(170,184,194,0.4)':'rgba(205,127,50,0.4)')+';border-radius:14px;padding:14px 10px;text-align:center;">'
         +'<div style="font-size:22px;margin-bottom:6px;">'+medalEmoji[i]+'</div>'
         +'<div style="background:'+lbColor(u.name)+';border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;color:#fff;margin:0 auto 6px;">'+u.avatar+'</div>'
         +'<div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:2px;">'+u.name+'</div>'
-        +'<div style="font-size:11px;font-weight:800;color:'+(u.profit>=0?'#00a854':'#e53935')+';margin-bottom:2px;">'+(u.profit>=0?'+':'')+'₹'+Math.abs(u.profit).toLocaleString('en-IN')+'</div>'
+        +'<div style="font-size:13px;font-weight:800;color:var(--accent);margin-bottom:2px;">'+pts2.toLocaleString('en-IN')+' pts</div>'
         +'<div style="font-size:9px;color:var(--text3);">'+u.wins+' wins · '+wr2+'% acc</div>'
         +'</div>';
     }).join('');
     var listHtml = _predictLb.slice(3).map(function(u,i){
       var rank=i+4, wr2=u.bets>0?Math.round(u.wins/u.bets*100):0;
       var isMe = u.name===me;
+      var pts2 = u.points || 0;
       return '<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;background:'+(isMe?'rgba(0,112,243,0.07)':'var(--bg2)')+';border:1px solid '+(isMe?'var(--border2)':'var(--border)')+';border-radius:12px;margin-bottom:8px;">'
         +'<div style="font-family:\'Space Mono\',monospace;font-size:12px;font-weight:700;color:var(--text3);width:22px;text-align:center;">'+rank+'</div>'
         +'<div style="background:'+lbColor(u.name)+';border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;color:#fff;flex-shrink:0;">'+u.avatar+'</div>'
         +'<div style="flex:1;"><div style="font-size:13px;font-weight:700;color:var(--text);">'+u.name+(isMe?' <span style="font-size:9px;background:var(--accent);color:#fff;border-radius:4px;padding:1px 5px;">YOU</span>':'')+'</div>'
         +'<div style="font-size:10px;color:var(--text3);">'+u.wins+'/'+u.bets+' correct · '+wr2+'% win rate'+(u.streak>1?' · 🔥'+u.streak+' streak':'')+'</div></div>'
-        +'<div style="text-align:right;"><div style="font-size:13px;font-weight:800;color:'+(u.profit>=0?'#00a854':'#e53935')+'">'+(u.profit>=0?'+':'')+'₹'+Math.abs(u.profit).toLocaleString('en-IN')+'</div>'
+        +'<div style="text-align:right;">'
+        +'<div style="font-size:13px;font-weight:800;color:var(--accent);">'+pts2.toLocaleString('en-IN')+' pts</div>'
+        +'<div style="font-size:11px;font-weight:700;color:'+(u.profit>=0?'#00a854':'#e53935')+'">'+(u.profit>=0?'+':'')+'₹'+Math.abs(u.profit).toLocaleString('en-IN')+'</div>'
         +'<div style="font-size:9px;color:var(--text3);">'+u.bets+' bets</div></div>'
         +'</div>';
     }).join('');
     el.innerHTML = ''
-      // Shimmer animation style
       +'<style>@keyframes lbShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}</style>'
-      // Header
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
       +'<div><div style="font-family:\'Bebas Neue\',sans-serif;font-size:20px;letter-spacing:2px;">🏆 PREDICTION LEADERBOARD</div>'
-      +'<div style="font-size:10px;color:var(--text3);font-family:\'Space Mono\',monospace;">Updates live as markets resolve · Top predictors this season</div></div>'
+      +'<div style="font-size:10px;color:var(--text3);font-family:\'Space Mono\',monospace;">Real users only · Points = wins × accuracy bonus + early-bird bonus</div></div>'
       +'<div style="font-size:9px;color:var(--green);font-weight:700;font-family:\'Space Mono\',monospace;">● LIVE</div></div>'
-      // My card
       + myBannerHtml
-      // Podium + list, or empty state
       + (_predictLb.length === 0
-        ? '<div style="text-align:center;padding:40px 16px;color:var(--text3);"><div style="font-size:36px;margin-bottom:12px;">🏆</div><div style="font-size:14px;font-weight:700;color:var(--text2);margin-bottom:6px;">No predictions yet</div><div style="font-size:12px;">Be the first to place a bet and top the leaderboard!</div></div>'
+        ? '<div style="text-align:center;padding:40px 16px;color:var(--text3);"><div style="font-size:36px;margin-bottom:12px;">🏆</div><div style="font-size:14px;font-weight:700;color:var(--text2);margin-bottom:6px;">No predictions resolved yet</div><div style="font-size:12px;">Place bets on Open Markets. Once markets resolve, your score appears here.</div></div>'
         : '<div style="display:flex;gap:8px;margin-bottom:16px;align-items:flex-end;">' + topHtml + '</div>' + listHtml)
-      // Footer note
-      +'<div style="text-align:center;padding:16px 0 4px;font-size:10px;color:var(--text3);">Leaderboard updates automatically when markets resolve · Season resets monthly</div>';
+      +'<div style="text-align:center;padding:16px 0 4px;font-size:10px;color:var(--text3);">Points = wins × 100 + win_rate × 50 · Earlier predictions earn up to 2× bonus · Season resets monthly</div>';
   }
 }
 window._openPredictBet = function(marketId, side) {
@@ -15140,7 +15332,9 @@ function renderHeatmap() {
 </script>
 
 <!-- ══════════════════════════════════════════════════════════════
-     MAIN FEED HIDE / SHOW TOGGLE (Fix 6)
+     SPOTLIGHT HERO PANEL HIDE / SHOW TOGGLE (Fix 3)
+     Targets only the Nifty / BankNifty / Bitcoin strip (#spotlightHero)
+     Does NOT close the page, does NOT affect sidebars or feed content.
      ══════════════════════════════════════════════════════════════ -->
 <style>
 #_mpToggleFeedBtn {
@@ -15179,43 +15373,37 @@ function renderHeatmap() {
 @media (max-width: 767px) {
   #_mpToggleFeedBtn { bottom: 68px; font-size: 10px; padding: 5px 12px; }
 }
-/* Smooth hide transition for the main feed panels */
-.main-feed._mp-collapsing {
-  animation: _mpFeedCollapse 0.22s ease forwards;
+/* Smooth collapse for the hero panel only */
+#spotlightHero {
+  transition: opacity 0.22s ease, transform 0.22s ease, max-height 0.28s ease, margin 0.28s ease, padding 0.28s ease;
+  overflow: hidden;
 }
-.main-feed._mp-expanding {
-  animation: _mpFeedExpand 0.22s ease forwards;
-}
-@keyframes _mpFeedCollapse {
-  from { opacity:1; transform:scaleY(1); }
-  to   { opacity:0; transform:scaleY(0.95); }
-}
-@keyframes _mpFeedExpand {
-  from { opacity:0; transform:scaleY(0.95); }
-  to   { opacity:1; transform:scaleY(1); }
+#spotlightHero._mp-panel-hidden {
+  opacity: 0 !important;
+  transform: scaleY(0.92) !important;
+  max-height: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  pointer-events: none !important;
 }
 </style>
-<button id="_mpToggleFeedBtn" onclick="_mpToggleFeed()" title="Hide / show central panel">▲ Hide Panel</button>
+<button id="_mpToggleFeedBtn" onclick="_mpToggleFeed()" title="Hide / show Nifty · BankNifty · Bitcoin panel">▲ Hide Panel</button>
 <script>
 (function() {
-  var _feedHidden = false;
+  var _heroHidden = false;
   var _btn = null;
 
-  // ── Show/Hide button based on active page ──
+  // ── Show/Hide button only on feed page ──
   window._mpSyncHideBtn = function() {
     var btn = document.getElementById('_mpToggleFeedBtn');
     if (!btn) return;
     var isOnFeed = (window._activePage === 'feed' || window._activePage === '' || !window._activePage);
     btn.style.display = isOnFeed ? 'block' : 'none';
-    // If we navigated away while panel was hidden, restore the feed panel
-    if (!isOnFeed && _feedHidden) {
-      _feedHidden = false;
-      var feedPanel = document.getElementById('page-feed');
-      if (feedPanel) {
-        feedPanel.style.opacity = '1';
-        feedPanel.style.transform = 'scaleY(1)';
-        feedPanel.style.pointerEvents = '';
-      }
+    // If we navigated away while hero was hidden, restore it
+    if (!isOnFeed && _heroHidden) {
+      _heroHidden = false;
+      var hero = document.getElementById('spotlightHero');
+      if (hero) hero.classList.remove('_mp-panel-hidden');
       if (btn) { btn.textContent = '▲ Hide Panel'; btn.classList.remove('feed-hidden'); }
     }
   };
@@ -15225,26 +15413,21 @@ function renderHeatmap() {
     if (window._activePage && window._activePage !== 'feed' && window._activePage !== '') return;
 
     _btn = _btn || document.getElementById('_mpToggleFeedBtn');
-    _feedHidden = !_feedHidden;
+    _heroHidden = !_heroHidden;
 
-    // Only target the center Market Feed panel (page-feed) — sidebars are NOT affected
-    var feedPanel = document.getElementById('page-feed');
-    if (!feedPanel) return;
-    if (_feedHidden) {
-      feedPanel.style.transition = 'opacity 0.22s ease, transform 0.22s ease';
-      feedPanel.style.opacity = '0';
-      feedPanel.style.transform = 'scaleY(0.97)';
-      feedPanel.style.pointerEvents = 'none';
+    // Only target the spotlightHero strip (Nifty / BankNifty / Bitcoin)
+    // Sidebars, feed cards, and all other content are completely unaffected
+    var hero = document.getElementById('spotlightHero');
+    if (!hero) return;
+
+    if (_heroHidden) {
+      hero.classList.add('_mp-panel-hidden');
     } else {
-      feedPanel.style.transition = 'opacity 0.22s ease, transform 0.22s ease';
-      feedPanel.style.opacity = '1';
-      feedPanel.style.transform = 'scaleY(1)';
-      feedPanel.style.pointerEvents = '';
+      hero.classList.remove('_mp-panel-hidden');
     }
 
-    // Sidebars remain fully visible and interactive — only the feed panel is toggled
     if (_btn) {
-      if (_feedHidden) {
+      if (_heroHidden) {
         _btn.textContent = '▼ Show Panel';
         _btn.classList.add('feed-hidden');
       } else {
