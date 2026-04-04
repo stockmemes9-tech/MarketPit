@@ -4301,6 +4301,8 @@ function handleFollowPost(username, btn) {
   showToast(isNowFollowing ? `✅ Following ${username}` : `Unfollowed ${username}`, isNowFollowing ? 'var(--green)' : 'var(--text3)');
   if (_feedMode === 'following') renderPosts();
   renderLeaderboard();
+  // Fire in-app notification
+  addInAppNotif(isNowFollowing ? `You followed ${username}` : `You unfollowed ${username}`, '👥');
 }
 
 function likePost(id, btn) {
@@ -4339,6 +4341,8 @@ function votePost(postId, dir, btn) {
   savePosts(posts);
   renderPosts();
   renderLeaderboard();
+  // Sync vote counts to shared store so all users see updated totals
+  _syncGlobalFeed().catch(() => {});
 }
 
 function deletePost(id) {
@@ -4401,6 +4405,8 @@ function submitComment() {
   input.style.height = 'auto';
   renderCommentsList();
   renderPosts(); // update comment count in feed
+  // Sync comment to shared store so all users see it
+  _syncGlobalFeed().catch(() => {});
 }
 
 function deleteComment(postId, commentId) {
@@ -4815,6 +4821,8 @@ function toggleFollow(username) {
     following.push(username);
     if (!followers[username]) followers[username] = [];
     if (!followers[username].includes(user.name)) followers[username].push(user.name);
+    // Fire notification (stored in notif log)
+    addInAppNotif(`You started following ${username}`, '👥', 'follow');
   }
   saveFollowing(following);
   saveFollowers(followers);
@@ -11051,38 +11059,146 @@ function onLiveDataUpdate(){
 }
 
 // ── GLOBAL FEED SYNC — attempt to pull posts from backend API ──
-async function _syncGlobalFeed() {
-  // Only try if online and API is accessible
+// ══════════════════════════════════════════════════════════════════
+// SHARED FEED — GitHub Contents API
+// posts.json lives directly in your repo. Reads are public (no auth).
+// Writes use a fine-grained PAT scoped only to this repo.
+//
+// ▶ SETUP (one-time, takes 2 minutes):
+//   1. Create  data/posts.json  in your repo with content: {"posts":[],"comments":{}}
+//   2. Go to GitHub → Settings → Developer settings → Personal access tokens
+//      → Fine-grained tokens → Generate new token
+//      · Repository access: only "AbheekPande/MarketPit"
+//      · Permissions → Contents → Read and Write
+//   3. Paste the token into _GH_TOKEN below.
+// ══════════════════════════════════════════════════════════════════
+const _GH_OWNER = 'AbheekPande';
+const _GH_REPO  = 'MarketPit';
+const _GH_FILE  = 'data/posts.json';
+const _GH_TOKEN = 'PASTE_YOUR_PAT_HERE'; // fine-grained, Contents read+write only
+
+// Public raw URL — no auth, instant, CDN-cached (reads)
+const _GH_RAW_URL = `https://raw.githubusercontent.com/${_GH_OWNER}/${_GH_REPO}/main/${_GH_FILE}`;
+// GitHub Contents API URL (writes)
+const _GH_API_URL = `https://api.github.com/repos/${_GH_OWNER}/${_GH_REPO}/contents/${_GH_FILE}`;
+
+let _ghWritePending = false;
+let _ghWriteTimer   = null;
+let _ghFileSha      = null; // required by GitHub API for updates
+
+// ── Read the shared store (public raw URL, no auth, fast) ──
+async function _sharedRead() {
   try {
-    const r = await fetch(API_BASE + '/posts', { signal: AbortSignal.timeout(4000) });
-    if (!r.ok) return;
-    const data = await r.json();
-    if (!Array.isArray(data) || !data.length) return;
-    // Merge API posts with local posts (deduplicate by id)
-    const local = getPosts();
-    const localIds = new Set(local.map(p => String(p.id)));
-    const newPosts = data.filter(p => !localIds.has(String(p.id)));
-    if (newPosts.length) {
-      const merged = [...local, ...newPosts].sort((a,b) => new Date(b.time)-new Date(a.time));
-      savePosts(merged);
-      renderPosts();
-      renderLeaderboard();
-    }
-  } catch(e) {
-    // API not available — use local posts only
-  }
+    // Cache-bust with timestamp so we always get the latest commit
+    const r = await fetch(_GH_RAW_URL + '?t=' + Math.floor(Date.now() / 10000), {
+      signal: AbortSignal.timeout(7000)
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch(e) { return null; }
 }
 
-// ── PUSH local post to backend API ──
-async function _pushPostToApi(post) {
+// ── Write the shared store via GitHub Contents API (debounced 1 s) ──
+function _sharedWrite(data) {
+  if (_GH_TOKEN === 'PASTE_YOUR_PAT_HERE') return; // not configured yet
+  if (_ghWriteTimer) clearTimeout(_ghWriteTimer);
+  _ghWriteTimer = setTimeout(() => _ghDoWrite(data), 1000);
+}
+
+async function _ghDoWrite(data) {
+  if (_ghWritePending) {
+    // Re-queue — another write is in flight
+    _ghWriteTimer = setTimeout(() => _ghDoWrite(data), 1500);
+    return;
+  }
+  _ghWritePending = true;
   try {
-    await fetch(API_BASE + '/posts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(post),
-      signal: AbortSignal.timeout(3000)
+    // Fetch the current SHA (needed for GitHub to accept the PUT)
+    if (!_ghFileSha) {
+      const meta = await fetch(_GH_API_URL, {
+        headers: { 'Authorization': 'Bearer ' + _GH_TOKEN },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (meta.ok) {
+        const mj = await meta.json();
+        _ghFileSha = mj.sha;
+      }
+    }
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+    const body = { message: 'feed: sync posts/votes/comments', content, sha: _ghFileSha };
+    const r = await fetch(_GH_API_URL, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + _GH_TOKEN,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(12000)
     });
+    if (r.ok) {
+      const rj = await r.json();
+      _ghFileSha = rj.content?.sha || null; // store new SHA for next write
+    } else if (r.status === 409) {
+      // Conflict — SHA is stale, clear it so next write re-fetches
+      _ghFileSha = null;
+    }
   } catch(e) {}
+  _ghWritePending = false;
+}
+
+// ── Merge remote data into local, then push local additions back ──
+async function _syncGlobalFeed() {
+  const remote = await _sharedRead();
+  if (!remote) return; // network unavailable — local-only mode
+
+  // ── POSTS: merge remote into local (remote is source of truth for all users) ──
+  const localPosts  = getPosts();
+  const localIds    = new Set(localPosts.map(p => String(p.id)));
+  const remotePosts = Array.isArray(remote.posts) ? remote.posts : [];
+
+  // Pull in posts that exist remotely but not locally
+  const incoming = remotePosts.filter(p => !localIds.has(String(p.id)));
+
+  // Sync vote counts from remote into local posts so everyone sees same totals
+  const remoteById = Object.fromEntries(remotePosts.map(p => [String(p.id), p]));
+  const synced = localPosts.map(p => {
+    const rp = remoteById[String(p.id)];
+    if (!rp) return p;
+    // Take the higher vote count (prevents a sync from rolling back a fresh local vote)
+    return {
+      ...p,
+      upvotes:   Math.max(rp.upvotes   || 0, p.upvotes   || 0),
+      downvotes: Math.max(rp.downvotes || 0, p.downvotes || 0),
+      likes:     Math.max(rp.likes     || 0, p.likes     || 0),
+    };
+  });
+
+  const merged = [...synced, ...incoming].sort((a,b) => new Date(b.time)-new Date(a.time));
+  savePosts(merged.slice(0, 200)); // cap at 200 to stay within localStorage quota
+
+  // ── COMMENTS: merge remote comments, preserving local-only ones ──
+  const localComments  = getComments();
+  const remoteComments = (remote.comments && typeof remote.comments === 'object') ? remote.comments : {};
+  const mergedComments = { ...remoteComments };
+  Object.keys(localComments).forEach(pid => {
+    const localList  = localComments[pid]  || [];
+    const remoteList = remoteComments[pid] || [];
+    const remoteIds  = new Set(remoteList.map(c => String(c.id)));
+    const extra      = localList.filter(c => !remoteIds.has(String(c.id)));
+    if (extra.length) mergedComments[pid] = [...remoteList, ...extra];
+  });
+  saveComments(mergedComments);
+
+  renderPosts();
+  renderLeaderboard();
+
+  // Push merged state back to GitHub so others see the latest
+  _sharedWrite({ posts: merged.slice(0, 200), comments: mergedComments });
+}
+
+// ── Called after submitPost — post is already in localStorage, just sync ──
+async function _pushPostToApi(post) {
+  await _syncGlobalFeed();
 }
 
 // ── STARTUP — wait for DOM to be ready ──
