@@ -4301,8 +4301,6 @@ function handleFollowPost(username, btn) {
   showToast(isNowFollowing ? `✅ Following ${username}` : `Unfollowed ${username}`, isNowFollowing ? 'var(--green)' : 'var(--text3)');
   if (_feedMode === 'following') renderPosts();
   renderLeaderboard();
-  // Fire in-app notification
-  addInAppNotif(isNowFollowing ? `You followed ${username}` : `You unfollowed ${username}`, '👥');
 }
 
 function likePost(id, btn) {
@@ -4339,10 +4337,6 @@ function votePost(postId, dir, btn) {
   p.likes = p.upvotes; // keep legacy compat
   saveVotes(votes);
   savePosts(posts);
-  // Fire notification if upvoting someone else's post
-  if (dir === 1 && p.author !== user.name) {
-    addInAppNotif(`You upvoted ${p.author}'s post`, '👍');
-  }
   renderPosts();
   renderLeaderboard();
 }
@@ -4821,8 +4815,6 @@ function toggleFollow(username) {
     following.push(username);
     if (!followers[username]) followers[username] = [];
     if (!followers[username].includes(user.name)) followers[username].push(user.name);
-    // Fire notification (stored in notif log)
-    addInAppNotif(`You started following ${username}`, '👥', 'follow');
   }
   saveFollowing(following);
   saveFollowers(followers);
@@ -6888,8 +6880,7 @@ function _switchScreenerTabSilent(tab) {
 
   if (tab === 'patterns')       renderPatterns();
   if (tab === 'livepatterns')   renderLivePatterns();
-  if (tab === 'volumeshockers') { refreshVolumeShockers(false); _vsStartAutoRefresh(); }
-  else _vsStopAutoRefresh();
+  if (tab === 'volumeshockers') refreshVolumeShockers(false);
 }
 
 function switchTabMobile(btn, page) {
@@ -7319,20 +7310,7 @@ let _vsSearchQ   = '';      // live search filter
 let _vsLiveData  = [];      // cached live data from API
 let _vsLoading   = false;
 let _vsLastFetch = 0;
-let _vsAutoRefreshTimer = null;
 const _VS_CACHE_MS = 3 * 60 * 1000; // 3-minute cache
-
-function _vsStartAutoRefresh() {
-  _vsStopAutoRefresh();
-  _vsAutoRefreshTimer = setInterval(function() {
-    _vsLastFetch = 0; // bust cache for a fresh live fetch
-    _vsFetchLive();
-  }, _VS_CACHE_MS);
-}
-
-function _vsStopAutoRefresh() {
-  if (_vsAutoRefreshTimer) { clearInterval(_vsAutoRefreshTimer); _vsAutoRefreshTimer = null; }
-}
 
 // NSE-listed stocks to monitor for volume shocks (Yahoo Finance symbols)
 const _VS_SYMBOLS = [
@@ -7420,7 +7398,6 @@ function refreshVolumeShockers(force) {
 
 function renderVolumeShockers() {
   _vsFetchLive();
-  _vsStartAutoRefresh();
 }
 
 // ── Fetch live volume data via Yahoo Finance (multi-proxy fallback) ─
@@ -7510,12 +7487,33 @@ async function _vsFetchLive() {
   }
 }
 
-// ── Fallback when live fetch fails — always show error, never stale static data ──
+// ── Fallback to STATIC_TECH if live fetch fails ───────────────────
 function _vsFallbackStatic() {
-  const body = document.getElementById('volumeShockersBody');
-  if (body) body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚠️</div><div style="font-size:14px;color:var(--text2);font-weight:600;">Live data unavailable</div><div style="font-size:12px;margin-top:6px;">Markets may be closed or API is rate-limited. Try again shortly.</div><button onclick="refreshVolumeShockers(true)" style="margin-top:12px;padding:7px 18px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;">↺ Retry</button></div>';
+  const techData = (typeof STATIC_TECH !== 'undefined') ? STATIC_TECH : {};
+  if (!Object.keys(techData).length) {
+    const body = document.getElementById('volumeShockersBody');
+    if (body) body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚠️</div><div style="font-size:14px;color:var(--text2);font-weight:600;">Live data unavailable</div><div style="font-size:12px;margin-top:6px;">Markets may be closed or API is rate-limited. Try again shortly.</div><button onclick="refreshVolumeShockers(true)" style="margin-top:12px;padding:7px 18px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;">↺ Retry</button></div>';
+    return;
+  }
+  const nameMap = Object.fromEntries(_VS_SYMBOLS.map(s => [s.sym.replace('.NS',''), s.name]));
+  _vsLiveData = Object.entries(techData)
+    .filter(([, d]) => d.vol_ratio != null)
+    .map(([sym, d]) => {
+      const lsArr = (typeof liveStocks !== 'undefined' && Array.isArray(liveStocks)) ? liveStocks : [];
+      const live = lsArr.find(x => x && x.sym === sym) || {};
+      const price = live.price || d.price || 100;
+      const change1d = live.chg != null ? live.chg : (d.change_1d != null ? d.change_1d : 0);
+      const seed = sym.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xffff, 0);
+      const jitter = 0.85 + (seed % 100) / 333;
+      const base = price > 5000 ? 500000 : price > 1000 ? 2000000 : price > 100 ? 5000000 : 10000000;
+      const todayVol = Math.round(base * d.vol_ratio * jitter);
+      const avgVol   = Math.round(todayVol / d.vol_ratio);
+      return { sym, name: nameMap[sym] || sym, price, change1d, todayVol, avgVol, ratio: d.vol_ratio, spike: d.vol_ratio >= 1.5 };
+    });
+  _vsLastFetch = Date.now();
   const upd = document.getElementById('vsLastUpdated');
-  if (upd) upd.textContent = 'Failed — retry above';
+  if (upd) upd.textContent = 'Estimated (offline)';
+  _vsRenderTable();
 }
 
 // ── Render the table from _vsLiveData ─────────────────────────────
@@ -7634,8 +7632,7 @@ function switchScreenerTab(tab) {
 
   if (tab === 'patterns') renderPatterns();
   if (tab === 'livepatterns') renderLivePatterns();
-  if (tab === 'volumeshockers') { refreshVolumeShockers(false); _vsStartAutoRefresh(); }
-  else _vsStopAutoRefresh();
+  if (tab === 'volumeshockers') refreshVolumeShockers(false);
 }
 
 
