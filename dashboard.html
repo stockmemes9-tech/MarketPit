@@ -109,6 +109,46 @@ body[class*='bg-'] .content-area {
   z-index: 10;
   position: relative;
 }
+
+/* ── PAPER TRADING — MOBILE RESPONSIVE ── */
+@media (max-width: 768px) {
+  #page-paper { overflow-y: auto !important; }
+  #page-paper > div:first-child { flex-wrap: wrap !important; padding: 10px 12px 6px !important; }
+  #page-paper > div:first-child > div:first-child { flex: 1 1 100% !important; margin-bottom: 6px; }
+  #page-paper > div:first-child > div:last-child { flex: 1 1 100% !important; }
+  /* Tabs row — horizontal scroll */
+  #page-paper > div:first-child > div:nth-child(2) { overflow-x: auto !important; flex-wrap: nowrap !important; padding: 0 12px !important; scrollbar-width: none; }
+  #page-paper > div:first-child > div:nth-child(2)::-webkit-scrollbar { display: none; }
+  /* Balance card */
+  #ptBalance { font-size: 14px !important; }
+  /* Trade form max-width relaxed */
+  #paperBody > div { padding: 12px !important; }
+  #paperBody > div > div[style*="max-width:460px"] { max-width: 100% !important; padding: 0 !important; }
+  /* Asset card flex wrap */
+  #ptAssetCard { flex-wrap: wrap !important; }
+  /* Qty input full width */
+  #ptQty { font-size: 16px !important; }
+  /* Execute button full width */
+  #ptExecBtn { width: 100% !important; font-size: 14px !important; }
+  /* Holdings table — horizontal scroll */
+  #paperBody table { width: 100% !important; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Grid layouts in paper trade stats */
+  #paperBody .stat-grid-2, #paperBody .stat-grid-3 { grid-template-columns: 1fr 1fr !important; }
+  /* Search dropdown full width */
+  #ptSearchDrop { left: 0 !important; right: 0 !important; }
+  /* Trade mode grid */
+  #paperBody div[style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr 1fr !important; }
+  /* Order type buttons */
+  #paperBody div[style*="display:flex;gap:6px"] button { flex: 1 !important; min-width: 0 !important; }
+  /* Positions / holdings rows */
+  .pt-holding-row { flex-wrap: wrap !important; }
+}
+@media (max-width: 480px) {
+  #page-paper > div:first-child { padding: 8px !important; }
+  #ptBalance { font-size: 13px !important; letter-spacing: -0.5px !important; }
+  #paperBody .stat-grid-2, #paperBody .stat-grid-3 { grid-template-columns: 1fr !important; gap: 6px !important; }
+}
+
 /* ── DM MESSAGES PAGE — mobile responsive ── */
 @media (max-width: 767px) {
   #page-messages { flex-direction: column !important; }
@@ -1331,10 +1371,19 @@ header {
 
 
 
-    <div class="feed-filters">
-      <button class="filter-btn active" onclick="setFilter(this)">🔥 Hot</button>
-      <button class="filter-btn" onclick="setFilter(this)">✨ New</button>
-      <button class="filter-btn" onclick="setFilter(this)">📌 Following</button>
+    <div class="feed-filters" id="feedFilterRow">
+      <button class="filter-btn active" data-mode="hot"       onclick="setFeedMode(this,'hot')">🔥 Hot</button>
+      <button class="filter-btn"        data-mode="new"       onclick="setFeedMode(this,'new')">✨ New</button>
+      <button class="filter-btn"        data-mode="following" onclick="setFeedMode(this,'following')">📌 Following</button>
+    </div>
+    <div id="feedCategoryRow" style="padding:6px 16px 4px;border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;flex-shrink:0;scrollbar-width:none;">
+      <style>#feedCategoryRow::-webkit-scrollbar{display:none;}</style>
+      <button class="pcat-btn active-pcat" data-cat="" onclick="setFeedCat(this,'')">All</button>
+      <button class="pcat-btn" data-cat="Stocks"      onclick="setFeedCat(this,'Stocks')">🏦 Stocks</button>
+      <button class="pcat-btn" data-cat="Crypto"      onclick="setFeedCat(this,'Crypto')">₿ Crypto</button>
+      <button class="pcat-btn" data-cat="Commodities" onclick="setFeedCat(this,'Commodities')">🛢️ Commodities</button>
+      <button class="pcat-btn" data-cat="Macro"       onclick="setFeedCat(this,'Macro')">🌐 Macro</button>
+      <button class="pcat-btn" data-cat="Options"     onclick="setFeedCat(this,'Options')">📈 Options</button>
     </div>
     <div class="feed-scroll">
       <div id="postsContainer"></div>
@@ -2592,6 +2641,12 @@ const getMsgs     = () => { try { return JSON.parse(localStorage.getItem('mp_cha
 const saveMsgs    = m  => localStorage.setItem('mp_chat', JSON.stringify(m));
 const getLiked    = () => { try { return JSON.parse(localStorage.getItem('mp_liked')||'[]'); } catch(e){return [];} };
 const saveLiked   = l  => localStorage.setItem('mp_liked', JSON.stringify(l));
+// Votes: { [postId]: 1=upvoted, -1=downvoted, 0=neutral }
+const getVotes    = () => { try { return JSON.parse(localStorage.getItem('mp_votes')||'{}'); } catch(e){return {};} };
+const saveVotes   = v  => localStorage.setItem('mp_votes', JSON.stringify(v));
+// Notifications queue
+const getNotifLog = () => { try { return JSON.parse(localStorage.getItem('mp_notiflog')||'[]'); } catch(e){return [];} };
+const saveNotifLog= n  => localStorage.setItem('mp_notiflog', JSON.stringify(n));
 
 // ── CRYPTO & COMMODITY SYMBOLS ──
 const CRYPTO_LIST = [
@@ -2662,6 +2717,8 @@ function getAllLiveAssets() {
 let _retryCount = 0;
 let _currentFilter = '';
 let _selectedPit = '';
+let _feedMode = 'hot';       // hot | new | following
+let _feedCategory = '';     // '' | Stocks | Crypto | Commodities | Macro | Options
 
 // ── AVATAR COLORS ──
 const AV_COLORS = [
@@ -3566,12 +3623,31 @@ function onHeaderSearch(q) {
   const drop = document.getElementById('headerDrop');
   if (!q || q.length < 1) { drop.style.display='none'; return; }
   const ql = q.toLowerCase();
-  const stocks = allStockSymbols.filter(s => s.sym.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql)).slice(0,4);
+
+  // Stocks / Crypto / Commodity search
+  const stocks = allStockSymbols.filter(s => s.sym.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql)).slice(0,3);
   const crypto = CRYPTO_LIST.filter(s => s.sym.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql)).slice(0,2);
-  const comm   = COMM_LIST.filter(s => s.sym.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql)).slice(0,2);
-  const all = [...stocks, ...crypto, ...comm].slice(0,8);
-  if (!all.length) { drop.style.display='none'; return; }
-  drop.innerHTML = all.map(s=>`
+  const comm   = COMM_LIST.filter(s => s.sym.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql)).slice(0,1);
+  const assetItems = [...stocks, ...crypto, ...comm].slice(0,5);
+
+  // Post search
+  const posts = getPosts();
+  const matchingPosts = posts.filter(p =>
+    (p.text||'').toLowerCase().includes(ql) ||
+    (p.author||'').toLowerCase().includes(ql) ||
+    (p.hashtags||[]).some(h => h.toLowerCase().includes(ql))
+  ).slice(0,3);
+
+  // User search (unique authors from posts)
+  const seenAuthors = new Set();
+  const matchingUsers = posts.filter(p => {
+    if ((p.author||'').toLowerCase().includes(ql) && !seenAuthors.has(p.author)) {
+      seenAuthors.add(p.author); return true;
+    }
+    return false;
+  }).slice(0,2);
+
+  const assetHTML = assetItems.map(s => `
     <div style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);transition:background 0.1s;"
       onmouseover="this.style.background='rgba(0,112,243,0.05)'" onmouseout="this.style.background=''"
       onmousedown="event.preventDefault();openStockModal('${s.sym}','${s.name.replace(/'/g,'')}');document.getElementById('headerSearch').value='';document.getElementById('headerDrop').style.display='none'">
@@ -3581,6 +3657,38 @@ function onHeaderSearch(q) {
       </div>
       <span style="font-size:9px;color:${s.bc};border:1px solid ${s.bc}44;border-radius:4px;padding:2px 5px;">${s.badge}</span>
     </div>`).join('');
+
+  const userHTML = matchingUsers.map(p => `
+    <div style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);transition:background 0.1s;"
+      onmouseover="this.style.background='rgba(0,112,243,0.05)'" onmouseout="this.style.background=''"
+      onmousedown="event.preventDefault();openUserProfile('${p.author}');document.getElementById('headerSearch').value='';document.getElementById('headerDrop').style.display='none'">
+      <div style="width:28px;height:28px;border-radius:50%;background:${getColor(p.author)};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;">${p.author.slice(0,2).toUpperCase()}</div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--text);">${p.author}</div>
+        <div style="font-size:10px;color:var(--text3);">@${p.author.toLowerCase().replace(/\s/g,'')}</div>
+      </div>
+      <span style="font-size:9px;color:var(--accent);border:1px solid rgba(0,112,243,0.3);border-radius:4px;padding:2px 5px;margin-left:auto;">Trader</span>
+    </div>`).join('');
+
+  const postHTML = matchingPosts.map(p => `
+    <div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s;"
+      onmouseover="this.style.background='rgba(0,112,243,0.05)'" onmouseout="this.style.background=''"
+      onmousedown="event.preventDefault();showPage('feed');document.getElementById('headerSearch').value='';document.getElementById('headerDrop').style.display='none'">
+      <div style="font-size:11px;font-weight:600;color:var(--accent);">@${p.author}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(p.text||'').slice(0,80)}${p.text.length>80?'…':''}</div>
+    </div>`).join('');
+
+  const sections = [];
+  if (assetItems.length) sections.push(`<div style="padding:4px 12px;font-size:9px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:1px;background:var(--bg3);">ASSETS</div>` + assetHTML);
+  if (matchingUsers.length) sections.push(`<div style="padding:4px 12px;font-size:9px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:1px;background:var(--bg3);">TRADERS</div>` + userHTML);
+  if (matchingPosts.length) sections.push(`<div style="padding:4px 12px;font-size:9px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:1px;background:var(--bg3);">POSTS</div>` + postHTML);
+
+  if (!sections.length) {
+    drop.innerHTML = `<div style="padding:14px 12px;text-align:center;color:var(--text3);font-size:12px;">No results for "${q}"</div>`;
+    drop.style.display='block';
+    return;
+  }
+  drop.innerHTML = sections.join('');
   drop.style.display='block';
 }
 
@@ -4070,89 +4178,162 @@ function renderStockBody(sym, d, p, isStatic=false) {
 
 // ── POSTS ──
 function renderPosts() {
-  const posts = getPosts();
-  const liked = getLiked();
-  const f = _currentFilter;
-  let filtered;
-  if (f === 'foryou') {
-    const user = getUser();
-    const interests = user?.interests || [];
-    // Map interest IDs to pit names and keywords
-    const pitMap = {stocks:'Stocks',largecap:'Stocks',smallcap:'Stocks',ipo:'Stocks',dividends:'Stocks',intraday:'Stocks',swing:'Stocks',options:'Options',futures:'Options',technicals:'Stocks',scalping:'Stocks',bitcoin:'Crypto',ethereum:'Crypto',altcoins:'Crypto',defi:'Crypto',nft:'Crypto',web3:'Crypto',rbi:'Macro',fii:'Macro',inflation:'Macro',gdp:'Macro',globalmarkets:'Macro',gold:'Commodities',crudeoil:'Commodities',silver:'Commodities',agri:'Commodities',banking:'Stocks',it:'Stocks',pharma:'Stocks',auto:'Stocks',realestate:'Stocks',fmcg:'Stocks',energy:'Commodities',infra:'Stocks'};
-    const interestedPits = new Set(interests.map(id => pitMap[id]).filter(Boolean));
-    const kwMap = {bitcoin:'btc',ethereum:'eth',gold:'gold',crudeoil:'crude oil',silver:'silver',options:'options',futures:'futures',technicals:'technical',banking:'bank',pharma:'pharma',auto:'auto',intraday:'intraday',swing:'swing',ipo:'ipo'};
-    const keywords = interests.map(id => kwMap[id]).filter(Boolean);
-    filtered = posts.filter(p => {
-      if (interestedPits.has(p.pit)) return true;
-      const txt = (p.text||'').toLowerCase();
-      if (keywords.some(kw => txt.includes(kw))) return true;
-      if (p.hashtags?.some(h => interests.some(id => h.includes(id)))) return true;
-      return false;
-    });
-    if (!filtered.length) filtered = posts; // fallback to all
-  } else {
-    filtered = f ? posts.filter(p=>p.pit===f) : posts;
+  // ── Step 1: get ALL posts (global) ──
+  let posts = getPosts();
+
+  // ── Step 2: category filter ──
+  if (_feedCategory) {
+    posts = posts.filter(p => p.pit === _feedCategory);
   }
-  const container = document.getElementById('postsContainer');
-  if (!filtered.length) {
-    const user = getUser();
-    if (f === 'foryou' && !user?.interests?.length) {
-      container.innerHTML = `<div class="empty-state"><div class="empty-icon">✨</div><div class="empty-title">Personalise your feed</div><div>Sign up and pick your interests to get a tailored feed.</div></div>`;
-    } else {
-      container.innerHTML = `<div class="empty-state">
-        <div class="empty-icon">📊</div>
-        <div class="empty-title">The pit is empty — be first</div>
-        <div style="max-width:300px;margin:0 auto 16px;">Share a trade idea, chart analysis, or market take. Use # for hashtags.</div>
-        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px;">
-          <span style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;color:var(--text3);">#nifty50</span>
-          <span style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;color:var(--text3);">#banknifty</span>
-          <span style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;color:var(--text3);">#swing</span>
-          <span style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;color:var(--text3);">#crypto</span>
-        </div>
-      </div>`;
+
+  // ── Step 3: feed mode filter + sort ──
+  const currentUser = getUser();
+  if (_feedMode === 'following') {
+    const following = getFollowing();
+    if (following.length) {
+      posts = posts.filter(p => following.includes(p.author));
     }
+    // If not following anyone: show all with a hint
+  }
+
+  // Sort
+  const comments = getComments();
+  if (_feedMode === 'new') {
+    posts = posts.slice().sort((a,b) => new Date(b.time) - new Date(a.time));
+  } else if (_feedMode === 'hot') {
+    posts = posts.slice().sort((a,b) => {
+      const scoreB = (b.likes||0) + (b.upvotes||0) - (b.downvotes||0) + ((comments[b.id]||[]).length * 2);
+      const scoreA = (a.likes||0) + (a.upvotes||0) - (a.downvotes||0) + ((comments[a.id]||[]).length * 2);
+      // Decay by age (posts older than 24h get lower score)
+      const ageA = (Date.now() - new Date(a.time)) / 3600000;
+      const ageB = (Date.now() - new Date(b.time)) / 3600000;
+      return (scoreB / Math.max(1, ageB * 0.3)) - (scoreA / Math.max(1, ageA * 0.3));
+    });
+  } else {
+    // Default: newest first
+    posts = posts.slice().sort((a,b) => new Date(b.time) - new Date(a.time));
+  }
+
+  const container = document.getElementById('postsContainer');
+  if (!posts.length) {
+    const emptyMsg = _feedMode === 'following'
+      ? '<div class="empty-state"><div class="empty-icon">📌</div><div class="empty-title">Follow traders to see their posts</div><div>Find people to follow by browsing the feed or checking trending.</div></div>'
+      : `<div class="empty-state">
+          <div class="empty-icon">📊</div>
+          <div class="empty-title">The pit is empty — be first!</div>
+          <div style="max-width:300px;margin:0 auto 16px;">Share a trade idea, chart analysis, or market take. Use # for hashtags.</div>
+          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px;">
+            <span style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;color:var(--text3);">#nifty50</span>
+            <span style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;color:var(--text3);">#banknifty</span>
+            <span style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;color:var(--text3);">#swing</span>
+            <span style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;color:var(--text3);">#crypto</span>
+          </div>
+        </div>`;
+    container.innerHTML = emptyMsg;
     return;
   }
-  container.innerHTML = filtered.slice().reverse().map(p => {
-    const currentUser = getUser();
+
+  const votes = getVotes();
+  const pitColors = {Stocks:'var(--accent)',Crypto:'var(--gold)',Commodities:'var(--accent2)',Macro:'var(--green)',Options:'#8855ff'};
+
+  container.innerHTML = posts.map(p => {
     const isMe = currentUser && p.author === currentUser.name;
     const avDisp = isMe ? getAvatarDisplay(currentUser) : {type:'initials', val:p.author.slice(0,2).toUpperCase(), bg:getColor(p.author)};
     const avFontSize = avDisp.type === 'emoji' ? '18px' : '11px';
     const avHtml = avDisp.type === 'image'
       ? `<div class="post-av" style="background:transparent;overflow:hidden;padding:0;cursor:pointer;" onclick="openUserProfile('${p.author}')"><img src="${avDisp.val}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>`
       : `<div class="post-av" style="background:${avDisp.bg};font-size:${avFontSize};cursor:pointer;" onclick="openUserProfile('${p.author}')">${avDisp.val}</div>`;
-    const pitColors = {Stocks:'var(--accent)',Crypto:'var(--gold)',Commodities:'var(--accent2)',Macro:'var(--green)',Options:'#8855ff'};
     const pc = pitColors[p.pit] || 'var(--text3)';
-    const isLiked = liked.includes(p.id);
+    const myVote = votes[p.id] || 0;
+    const upvotes  = (p.upvotes  || p.likes || 0);
+    const downvotes = (p.downvotes || 0);
+    const netScore = upvotes - downvotes;
+    const scoreColor = netScore > 0 ? 'var(--green)' : netScore < 0 ? 'var(--red)' : 'var(--text3)';
+    const isFollowingAuthor = !isMe && isFollowing(p.author);
+    const showFollowBtn = !isMe && currentUser;
+    const commentCount = (getComments()[p.id]||[]).length;
     return `
     <div class="post-card">
       <div class="post-header">
         ${avHtml}
-        <div>
-          <div><span class="post-author" style="cursor:pointer;" onclick="openUserProfile('${p.author}')">${isMe ? (currentUser.displayName || p.author) : p.author}</span><span class="post-handle" style="cursor:pointer;" onclick="openUserProfile('${p.author}')">@${p.author.toLowerCase().replace(/\s/g,'')}</span></div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span class="post-author" style="cursor:pointer;" onclick="openUserProfile('${p.author}')">${isMe ? (currentUser.displayName || p.author) : p.author}</span>
+            <span class="post-handle" style="cursor:pointer;" onclick="openUserProfile('${p.author}')">@${p.author.toLowerCase().replace(/\s/g,'')}</span>
+            ${showFollowBtn ? `<button onclick="handleFollowPost('${p.author}',this)" style="font-size:10px;padding:2px 8px;border-radius:10px;cursor:pointer;font-weight:700;border:1.5px solid ${isFollowingAuthor?'var(--border)':'var(--accent)'};background:${isFollowingAuthor?'transparent':'rgba(0,112,243,0.08)'};color:${isFollowingAuthor?'var(--text3)':'var(--accent)'};transition:all 0.15s;">${isFollowingAuthor?'✓ Following':'+ Follow'}</button>` : ''}
+          </div>
           <div class="post-time">${new Date(p.time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})} IST · ${new Date(p.time).toLocaleDateString('en-IN')}</div>
         </div>
         ${p.pit?`<div class="post-pit" style="color:${pc};border-color:${pc}44;background:${pc}0f;">${p.pit}</div>`:''}
       </div>
       <div class="post-text">${highlightHashtags(p.text)}</div>
       <div class="post-footer">
-        <button class="post-action ${isLiked?'liked':''}" onclick="likePost(${p.id},this)" ${isLiked?'disabled':''}>↑ <span class="cnt">${p.likes||0}</span></button>
-        <button class="post-action" onclick="openComments(${p.id})">💬 <span>${(getComments()[p.id]||[]).length}</span></button>
+        <button class="post-action${myVote===1?' liked':''}" onclick="votePost(${p.id},1,this)" title="Upvote" style="${myVote===1?'color:var(--green);':''}">▲ <span class="cnt">${upvotes}</span></button>
+        <button class="post-action${myVote===-1?' liked':''}" onclick="votePost(${p.id},-1,this)" title="Downvote" style="${myVote===-1?'color:var(--red);':''}">▼ <span class="cnt">${downvotes}</span></button>
+        <span style="font-size:11px;font-weight:700;color:${scoreColor};padding:0 4px;">${netScore > 0 ? '+' : ''}${netScore}</span>
+        <button class="post-action" onclick="openComments(${p.id})">💬 <span>${commentCount}</span></button>
         <button class="post-action" onclick="sharePost(${p.id},event)">🔗 Share</button>
-        <button class="post-action" onclick="deletePost(${p.id})">🗑️</button>
+        ${isMe ? `<button class="post-action" onclick="deletePost(${p.id})">🗑️</button>` : ''}
       </div>
     </div>`;
   }).join('');
 }
 
+// ── Handle follow from post card ──
+function handleFollowPost(username, btn) {
+  toggleFollow(username);
+  const isNowFollowing = isFollowing(username);
+  btn.textContent = isNowFollowing ? '✓ Following' : '+ Follow';
+  btn.style.borderColor = isNowFollowing ? 'var(--border)' : 'var(--accent)';
+  btn.style.background  = isNowFollowing ? 'transparent' : 'rgba(0,112,243,0.08)';
+  btn.style.color       = isNowFollowing ? 'var(--text3)' : 'var(--accent)';
+  showToast(isNowFollowing ? `✅ Following ${username}` : `Unfollowed ${username}`, isNowFollowing ? 'var(--green)' : 'var(--text3)');
+  if (_feedMode === 'following') renderPosts();
+  renderLeaderboard();
+  // Fire in-app notification
+  addInAppNotif(isNowFollowing ? `You followed ${username}` : `You unfollowed ${username}`, '👥');
+}
+
 function likePost(id, btn) {
-  const liked = getLiked();
-  if (liked.includes(id)) return;
-  liked.push(id);
-  saveLiked(liked);
+  // legacy shim — delegate to votePost
+  votePost(id, 1, btn);
+}
+
+function votePost(postId, dir, btn) {
+  const user = getUser();
+  if (!user) { openModal('profileModal'); renderProfileModal(); return; }
+  const votes = getVotes();
+  const prev  = votes[postId] || 0;
   const posts = getPosts();
-  const p = posts.find(x=>x.id===id);
-  if (p) { p.likes=(p.likes||0)+1; savePosts(posts); btn.querySelector('.cnt').textContent=p.likes; btn.classList.add('liked'); btn.disabled=true; }
+  const p = posts.find(x => x.id === postId);
+  if (!p) return;
+
+  if (!p.upvotes)   p.upvotes   = p.likes || 0;
+  if (!p.downvotes) p.downvotes = 0;
+
+  // Toggle: clicking same direction removes vote
+  if (prev === dir) {
+    votes[postId] = 0;
+    if (dir === 1)  p.upvotes   = Math.max(0, p.upvotes   - 1);
+    if (dir === -1) p.downvotes = Math.max(0, p.downvotes - 1);
+  } else {
+    // Undo previous vote first
+    if (prev === 1)  p.upvotes   = Math.max(0, p.upvotes   - 1);
+    if (prev === -1) p.downvotes = Math.max(0, p.downvotes - 1);
+    // Apply new vote
+    votes[postId] = dir;
+    if (dir === 1)  p.upvotes++;
+    if (dir === -1) p.downvotes++;
+  }
+  p.likes = p.upvotes; // keep legacy compat
+  saveVotes(votes);
+  savePosts(posts);
+  // Fire notification if upvoting someone else's post
+  if (dir === 1 && p.author !== user.name) {
+    addInAppNotif(`You upvoted ${p.author}'s post`, '👍');
+  }
+  renderPosts();
+  renderLeaderboard();
 }
 
 function deletePost(id) {
@@ -4293,8 +4474,10 @@ function submitPost() {
   if (!text) return;
   const hashtags = [...new Set((text.match(/#\w+/g) || []).map(h => h.toLowerCase()))];
   const posts = getPosts();
-  posts.push({id:Date.now(), author:user.name, text, pit:_selectedPit, time:new Date().toISOString(), likes:0, hashtags});
+  const newPost = {id:Date.now(), author:user.name, text, pit:_selectedPit||_feedCategory||'', time:new Date().toISOString(), likes:0, upvotes:0, downvotes:0, hashtags};
+  posts.push(newPost);
   savePosts(posts);
+  _pushPostToApi(newPost).catch(()=>{});
   input.value='';
   _selectedPit='';
   closeHashtagPopup();
@@ -4615,6 +4798,7 @@ function toggleFollow(username) {
   const following = getFollowing();
   const followers = getFollowers();
   const idx = following.indexOf(username);
+  const nowFollowing = idx === -1;
   if (idx > -1) {
     // Unfollow
     following.splice(idx, 1);
@@ -4626,10 +4810,12 @@ function toggleFollow(username) {
     following.push(username);
     if (!followers[username]) followers[username] = [];
     if (!followers[username].includes(user.name)) followers[username].push(user.name);
+    // Fire notification (stored in notif log)
+    addInAppNotif(`You started following ${username}`, '👥', 'follow');
   }
   saveFollowing(following);
   saveFollowers(followers);
-  return idx === -1; // returns true if now following
+  return nowFollowing; // returns true if now following
 }
 
 function getFollowerCount(username) {
@@ -4840,6 +5026,12 @@ function _allKnownUsers() {
 
 // Active DM conversation
 var _dmActiveUser = null;
+
+// ── DM MESSAGE STORAGE ──
+const getDMConvs = () => { try { return JSON.parse(localStorage.getItem('mp_dm_convs')||'{}'); } catch(e){return {};} };
+const saveDMConvs = c => localStorage.setItem('mp_dm_convs', JSON.stringify(c));
+const getDMMessages = (cid) => { try { return JSON.parse(localStorage.getItem('mp_dm_' + cid)||'[]'); } catch(e){return [];} };
+const saveDMMessages = (cid, msgs) => localStorage.setItem('mp_dm_' + cid, JSON.stringify(msgs));
 
 function renderMessages() {
   const user = getUser();
@@ -6209,14 +6401,29 @@ function renderSettings(page) {
   } else if (page === 'notifs') {
     title.textContent = 'NOTIFICATIONS';
     const n = s.notifs || {};
+    const permState = ('Notification' in window) ? Notification.permission : 'unsupported';
+    const permColor = permState==='granted'?'var(--green)':permState==='denied'?'var(--red)':'var(--gold)';
+    const permLabel = permState==='granted'?'✅ Enabled':permState==='denied'?'❌ Blocked':permState==='unsupported'?'⚠️ Not Supported':'🔔 Enable Push Notifications';
     el.innerHTML = `
       <button onclick="renderSettings('main')" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;margin-bottom:16px;font-family:'DM Sans',sans-serif;">← Back</button>
+
+      <!-- Browser Notification Permission -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:20px;">
+        <div style="font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:1px;margin-bottom:8px;">BROWSER PUSH NOTIFICATIONS</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+          <div style="font-size:12px;color:var(--text2);">Status: <span style="font-weight:700;color:${permColor};">${permState.toUpperCase()}</span></div>
+          ${permState !== 'granted' && permState !== 'unsupported' ? `<button onclick="requestNotifPermission()" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-weight:700;font-size:12px;cursor:pointer;">Enable</button>` : `<span style="font-size:12px;color:${permColor};font-weight:700;">${permLabel}</span>`}
+        </div>
+      </div>
+
+      <div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:1px;margin-bottom:8px;">IN-APP NOTIFICATIONS</div>
       ${[
-        { key:'likes',    label:'Likes',           desc:'When someone likes your post' },
-        { key:'mentions', label:'Mentions',         desc:'When you are mentioned' },
-        { key:'newpost',  label:'New Posts',        desc:'Activity in your pits' },
-        { key:'price',    label:'Price Alerts',     desc:'Big market moves' },
-        { key:'news',     label:'Breaking News',    desc:'Major market news' },
+        { key:'likes',    label:'Upvotes & Votes',  desc:'When someone votes on your post' },
+        { key:'follows',  label:'Follows',           desc:'When someone follows you' },
+        { key:'mentions', label:'Comments',          desc:'When someone comments on your post' },
+        { key:'newpost',  label:'New Posts',         desc:'Activity in your pits' },
+        { key:'price',    label:'Price Alerts',      desc:'Big market moves' },
+        { key:'news',     label:'Breaking News',     desc:'Major market news' },
       ].map(item => `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--border);">
           <div>
@@ -6349,8 +6556,85 @@ function setSetting(key, value, page) {
   s[key] = value;
   saveSettings(s);
   applySettings(s);
+  if (key === 'language') applyLanguage(value);
   renderSettings(page || 'display');
 }
+
+// ── I18N — Language translations ──
+const _I18N = {
+  en: {},  // default — no transformation
+  hi: {
+    'Market Feed':'मार्केट फीड','Trading Pits':'ट्रेडिंग पिट्स','Stock Screener':'स्टॉक स्क्रीनर',
+    'Market News':'बाज़ार समाचार','Watchlist':'वॉचलिस्ट','Paper Trading':'पेपर ट्रेडिंग',
+    '🔥 Hot':'🔥 ट्रेंडिंग','✨ New':'✨ नया','📌 Following':'📌 फॉलोइंग',
+    'MESSAGES':'संदेश','SETTINGS':'सेटिंग्स','NOTIFICATIONS':'सूचनाएं',
+    'Share a trade idea…':'एक ट्रेड आइडिया शेयर करें…',
+    'Follow':'फॉलो करें','Unfollow':'अनफॉलो करें','Following':'फॉलो हो रहे हैं',
+    'Language':'भाषा','Display':'डिस्प्ले','Privacy':'गोपनीयता',
+  },
+  ta: {
+    'Market Feed':'சந்தை செய்திகள்','Trading Pits':'வர்த்தக பள்ளங்கள்',
+    'Stock Screener':'பங்கு திரையிடல்','Market News':'சந்தை செய்தி',
+    'Watchlist':'கண்காணிப்பு பட்டியல்','Paper Trading':'காகித வர்த்தகம்',
+    '🔥 Hot':'🔥 சூடான','✨ New':'✨ புதியது','📌 Following':'📌 பின்தொடர்பவர்',
+    'Follow':'பின்தொடர்','Unfollow':'பின்தொடர்வதை நிறுத்து','Following':'பின்தொடர்கிறோம்',
+    'Language':'மொழி','Display':'காட்சி','Privacy':'தனியுரிமை',
+  },
+  bn: {
+    'Market Feed':'বাজার ফিড','Trading Pits':'ট্রেডিং পিটস','Stock Screener':'স্টক স্ক্রিনার',
+    'Market News':'বাজারের খবর','Watchlist':'ওয়াচলিস্ট','Paper Trading':'পেপার ট্রেডিং',
+    '🔥 Hot':'🔥 ট্রেন্ডিং','✨ New':'✨ নতুন','📌 Following':'📌 ফলো করছেন',
+    'Follow':'ফলো করুন','Unfollow':'আনফলো করুন',
+    'Language':'ভাষা','Display':'প্রদর্শন','Privacy':'গোপনীয়তা',
+  },
+  mr: {
+    'Market Feed':'बाजार फीड','Trading Pits':'ट्रेडिंग पिट्स','Stock Screener':'स्टॉक स्क्रीनर',
+    '🔥 Hot':'🔥 ट्रेंडिंग','✨ New':'✨ नवीन','📌 Following':'📌 फॉलो करत आहे',
+    'Follow':'फॉलो करा','Unfollow':'अनफॉलो करा','Language':'भाषा',
+  },
+  gu: {
+    'Market Feed':'બજાર ફીડ','Trading Pits':'ટ્રેડિંગ પિટ્સ','Stock Screener':'સ્ટૉક સ્ક્રીનર',
+    '🔥 Hot':'🔥 ટ્રેન્ડિંગ','✨ New':'✨ નવું','📌 Following':'📌 ફૉલો કરી રહ્યા છો',
+    'Follow':'ફૉલો કરો','Language':'ભાષા',
+  },
+  te: {
+    'Market Feed':'మార్కెట్ ఫీడ్','Stock Screener':'స్టాక్ స్క్రీనర్',
+    '🔥 Hot':'🔥 ట్రెండింగ్','✨ New':'✨ కొత్తవి','📌 Following':'📌 అనుసరిస్తున్న',
+    'Follow':'అనుసరించు','Language':'భాష',
+  },
+};
+
+function t(key) {
+  const lang = (getSettings().language) || 'en';
+  return (_I18N[lang] && _I18N[lang][key]) || key;
+}
+
+function applyLanguage(lang) {
+  // Translate nav tabs
+  document.querySelectorAll('.nav-tab').forEach(btn => {
+    const text = btn.childNodes[btn.childNodes.length - 1];
+    if (text && text.nodeType === 3) {
+      const orig = btn.dataset.origText || text.textContent.trim();
+      btn.dataset.origText = orig;
+      text.textContent = ' ' + t(orig);
+    }
+  });
+  // Translate filter buttons
+  document.querySelectorAll('#feedFilterRow .filter-btn').forEach(btn => {
+    const orig = btn.dataset.origText || btn.textContent.trim();
+    btn.dataset.origText = orig;
+    btn.textContent = t(orig);
+  });
+  // Store preference
+  const s = getSettings(); s.language = lang; saveSettings(s);
+  showToast('Language updated!', 'var(--green)');
+}
+
+// Apply saved language on startup
+setTimeout(() => {
+  const lang = getSettings().language;
+  if (lang && lang !== 'en') applyLanguage(lang);
+}, 1200);
 
 function toggleNotif(key) {
   const s = getSettings();
@@ -6386,23 +6670,98 @@ function clearData() {
 // Apply saved settings on load
 applySettings(getSettings());
 
+// ── IN-APP NOTIFICATION SYSTEM ──
+function addInAppNotif(msg, icon, category) {
+  icon = icon || '🔔';
+  const log = getNotifLog();
+  log.unshift({ msg, icon, category: category||'system', ts: Date.now(), read: false });
+  // keep max 50 notifications
+  if (log.length > 50) log.splice(50);
+  saveNotifLog(log);
+  _updateNotifBadge();
+  // Browser notification if permitted
+  _sendBrowserNotif(icon + ' ' + msg);
+}
+
+function _updateNotifBadge() {
+  const log = getNotifLog();
+  const unread = log.filter(n => !n.read).length;
+  const badge = document.getElementById('notifBadge');
+  if (badge) {
+    badge.textContent = unread > 9 ? '9+' : unread;
+    badge.style.display = unread > 0 ? 'flex' : 'none';
+  }
+}
+
+function _sendBrowserNotif(text) {
+  try {
+    if (Notification.permission === 'granted') {
+      const s = getSettings();
+      if (s.notifs && s.notifs.likes === false) return;
+      new Notification('MarketPit', { body: text, icon: '/favicon.ico' });
+    }
+  } catch(e) {}
+}
+
+function requestNotifPermission() {
+  if (!('Notification' in window)) { showToast('Browser does not support notifications', 'var(--red)'); return; }
+  Notification.requestPermission().then(p => {
+    showToast(p === 'granted' ? '✅ Notifications enabled!' : '❌ Notification permission denied', p === 'granted' ? 'var(--green)' : 'var(--red)');
+    renderSettings('notifs');
+  });
+}
+
 // ── NOTIFICATIONS ──
 function renderNotifs() {
-  const posts = getPosts();
   const user = getUser();
   const el = document.getElementById('notifBody');
-  if (!user) { el.innerHTML=`<div style="color:var(--text3);padding:10px;">Set your username to see notifications.</div>`; return; }
-  const myPosts = posts.filter(p=>p.author===user.name && p.likes>0);
-  if (!myPosts.length) { el.innerHTML=`<div style="color:var(--text3);padding:10px;">No notifications yet.</div>`; return; }
-  el.innerHTML = myPosts.map(p=>`
-    <div style="display:flex;gap:12px;padding:12px;background:var(--bg3);border-radius:10px;border:1px solid var(--border);margin-bottom:8px;">
-      <span style="font-size:18px;">👍</span>
+  if (!user) { el.innerHTML=`<div style="color:var(--text3);padding:14px;">Sign in to see your notifications.</div>`; return; }
+
+  const log = getNotifLog();
+  // Mark all as read
+  const updated = log.map(n => ({...n, read: true}));
+  saveNotifLog(updated);
+  _updateNotifBadge();
+
+  // Also show engagement on own posts
+  const posts = getPosts();
+  const myPosts = posts.filter(p => p.author === user.name && ((p.upvotes||p.likes||0) > 0 || (p.downvotes||0) > 0));
+
+  const engagementItems = myPosts.map(p => {
+    const up = p.upvotes || p.likes || 0;
+    const dn = p.downvotes || 0;
+    return `<div style="display:flex;gap:12px;padding:12px;background:var(--bg3);border-radius:10px;border:1px solid var(--border);margin-bottom:8px;">
+      <span style="font-size:18px;">📊</span>
       <div>
-        <div style="font-size:13px;color:var(--text);">Your post got ${p.likes} like${p.likes!==1?'s':''}</div>
+        <div style="font-size:13px;color:var(--text);">Your post has ${up} upvote${up!==1?'s':''} · ${dn} downvote${dn!==1?'s':''}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:3px;">"${p.text.slice(0,60)}${p.text.length>60?'…':''}"</div>
       </div>
-    </div>`).join('');
+    </div>`;
+  });
+
+  const activityItems = log.slice(0,20).map(n => `
+    <div style="display:flex;gap:12px;padding:12px;background:var(--bg3);border-radius:10px;border:1px solid var(--border);margin-bottom:8px;">
+      <span style="font-size:18px;">${n.icon}</span>
+      <div>
+        <div style="font-size:13px;color:var(--text);">${n.msg}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:3px;">${new Date(n.ts).toLocaleString('en-IN',{hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'})}</div>
+      </div>
+    </div>`);
+
+  const allItems = [...activityItems, ...engagementItems];
+  if (!allItems.length) {
+    el.innerHTML = `<div style="text-align:center;padding:32px;color:var(--text3);">
+      <div style="font-size:36px;margin-bottom:8px;">🔔</div>
+      <div style="font-weight:600;color:var(--text2);">No notifications yet</div>
+      <div style="font-size:12px;margin-top:6px;">Activity from your posts and follows will show here.</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = allItems.join('');
 }
+
+// Update badge on load
+setTimeout(_updateNotifBadge, 500);
 
 // ── NAV ──
 
@@ -6524,6 +6883,7 @@ function _switchScreenerTabSilent(tab) {
 function switchTabMobile(btn, page) {
   navPush({ type: 'tab', page });
   _activePage = page;
+  if (typeof _mpSyncHideBtn === 'function') _mpSyncHideBtn();
   document.querySelectorAll('.bn-item').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   const ALL_PAGES = ['feed','pits','messages','screener','news','trending','watchlist',
@@ -6560,6 +6920,7 @@ function switchTabMobile(btn, page) {
 function switchTab(btn, page) {
   navPush({ type: 'tab', page });
   _activePage = page;
+  if (typeof _mpSyncHideBtn === 'function') _mpSyncHideBtn();
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   const ALL_PAGES = ['feed','pits','messages','screener','news','trending','watchlist',
@@ -8339,9 +8700,26 @@ function resetScreener() {
   document.getElementById('screenerResults').innerHTML = `<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">🔍</div><div style="font-size:14px;color:var(--text2);font-weight:600;">Set your filters and click Run Screen</div><div style="font-size:12px;margin-top:6px;">Screens NSE stocks, Crypto & Commodities in real-time</div></div>`;
 }
 
+// ── FEED MODE (Hot / New / Following) ──
+function setFeedMode(btn, mode) {
+  document.querySelectorAll('#feedFilterRow .filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _feedMode = mode;
+  renderPosts();
+}
+
+// Legacy alias used by pit filtering
 function setFilter(btn) {
   document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
+}
+
+// ── CATEGORY FILTER ──
+function setFeedCat(btn, cat) {
+  document.querySelectorAll('#feedCategoryRow .pcat-btn').forEach(b => b.classList.remove('active-pcat'));
+  btn.classList.add('active-pcat');
+  _feedCategory = cat;
+  renderPosts();
 }
 
 // ── MODALS ──
@@ -8946,17 +9324,44 @@ function createAlert(){
   saveAlerts(alerts); closeModal('notifModal'); renderAlerts();
   showToast(`Alert set: ${sym} ${cond} ₹${price}`,'var(--green)');
 }
-// Check alerts against live prices every 30s (only when page visible)
+// Alert check — runs every 30s globally (not just on alerts page)
+const _triggeredAlerts = new Set();  // avoid duplicate notifications
 setInterval(()=>{
-  if(document.getElementById('page-alerts')?.style.display==='none') return;
   if(!liveStocks?.length) return;
-  const alerts=getAlerts();
-  const triggered=alerts.some(a=>{
-    const s=liveStocks.find(x=>x.sym===a.sym);
-    return s?.price && ((a.cond==='above'&&s.price>=a.price)||(a.cond==='below'&&s.price<=a.price));
+  const alerts = getAlerts();
+  let anyTriggered = false;
+  alerts.forEach((a, i) => {
+    const s = liveStocks.find(x => x.sym === a.sym);
+    if (!s?.price) return;
+    const hit = (a.cond==='above' && s.price >= a.price) || (a.cond==='below' && s.price <= a.price);
+    if (hit && !_triggeredAlerts.has(i + '_' + a.price)) {
+      _triggeredAlerts.add(i + '_' + a.price);
+      anyTriggered = true;
+      // In-app notification
+      addInAppNotif(`🔔 Alert triggered: ${a.sym} ${a.cond==='above'?'▲':'▼'} ₹${a.price} (Current: ₹${typeof s.price==='number'?s.price.toLocaleString('en-IN'):s.price})`, '🔔', 'alert');
+      // Auto-clear triggered key after 5 min to allow re-trigger
+      setTimeout(() => _triggeredAlerts.delete(i + '_' + a.price), 300000);
+    }
   });
-  if(triggered) renderAlerts();
-},30000);
+  // Refresh alerts page if open
+  if (anyTriggered && window._activePage === 'alerts') renderAlerts();
+}, 30000);
+
+// Also trigger immediate check when live data updates
+function _checkAlertsOnLiveData() {
+  if (!liveStocks?.length) return;
+  const alerts = getAlerts();
+  alerts.forEach((a, i) => {
+    const s = liveStocks.find(x => x.sym === a.sym);
+    if (!s?.price) return;
+    const hit = (a.cond==='above' && s.price >= a.price) || (a.cond==='below' && s.price <= a.price);
+    if (hit && !_triggeredAlerts.has(i + '_' + a.price)) {
+      _triggeredAlerts.add(i + '_' + a.price);
+      addInAppNotif(`🔔 Alert: ${a.sym} ${a.cond==='above'?'▲':'▼'} ₹${a.price}`, '🔔', 'alert');
+      setTimeout(() => _triggeredAlerts.delete(i + '_' + a.price), 300000);
+    }
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // MUTUAL FUNDS PAGE
@@ -10429,6 +10834,7 @@ function renderRooms(){}
 
 function onLiveDataUpdate(){
   try { updateWhatsMoving(); } catch(e) {}
+  try { _checkAlertsOnLiveData(); } catch(e) {}
   try { updateTickerFromLive(); } catch(e) {}
   try { renderTrending(liveStocks); } catch(e) {}
   try { renderSidebarMmi(); } catch(e) {}
@@ -10446,12 +10852,50 @@ function onLiveDataUpdate(){
   } catch(e) {}
 }
 
+// ── GLOBAL FEED SYNC — attempt to pull posts from backend API ──
+async function _syncGlobalFeed() {
+  // Only try if online and API is accessible
+  try {
+    const r = await fetch(API_BASE + '/posts', { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!Array.isArray(data) || !data.length) return;
+    // Merge API posts with local posts (deduplicate by id)
+    const local = getPosts();
+    const localIds = new Set(local.map(p => String(p.id)));
+    const newPosts = data.filter(p => !localIds.has(String(p.id)));
+    if (newPosts.length) {
+      const merged = [...local, ...newPosts].sort((a,b) => new Date(b.time)-new Date(a.time));
+      savePosts(merged);
+      renderPosts();
+      renderLeaderboard();
+    }
+  } catch(e) {
+    // API not available — use local posts only
+  }
+}
+
+// ── PUSH local post to backend API ──
+async function _pushPostToApi(post) {
+  try {
+    await fetch(API_BASE + '/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(post),
+      signal: AbortSignal.timeout(3000)
+    });
+  } catch(e) {}
+}
+
 // ── STARTUP — wait for DOM to be ready ──
 function _mpInit() {
   updateAvatars();
   renderPosts();
   renderTrendingTags();
   renderLeaderboard();
+
+  // ── Attempt to sync posts from backend API (global feed) ──
+  _syncGlobalFeed().catch(() => {});
 
   // ── STEP 1: Render static prices INSTANTLY at frame 0 — UI is never blank ──
   STATIC_CRYPTO.forEach(s => { if (!liveStocks.find(x=>x.sym===s.sym)) liveStocks.push({...s, _live:false}); });
@@ -11381,7 +11825,7 @@ function _updateLbFromBets() {
 // ── NIFTY 5-MIN PREDICTION STATE ─────────────────────────────────
 var _nifty5State = JSON.parse(localStorage.getItem('mp_nifty5') || 'null');
 if (!_nifty5State) {
-  _nifty5State = { upVotes:124, downVotes:89, userVote:null, userAmount:0, roundStart:Date.now(), lastPrice:null, resolved:false, resolveResult:null };
+  _nifty5State = { upVotes:0, downVotes:0, userVote:null, userAmount:0, roundStart:Date.now(), lastPrice:null, resolved:false, resolveResult:null };
   localStorage.setItem('mp_nifty5', JSON.stringify(_nifty5State));
 }
 var _nifty5Timer = null;
@@ -11492,7 +11936,7 @@ window._n5Confirm = function(dir) {
   _renderPredictBalance();
 };
 window._nifty5NewRound = function() {
-  _nifty5State = { upVotes:Math.floor(80+Math.random()*80), downVotes:Math.floor(50+Math.random()*70), userVote:null, userAmount:0, roundStart:Date.now(), lastPrice:null, resolved:false, resolveResult:null };
+  _nifty5State = { upVotes:0, downVotes:0, userVote:null, userAmount:0, roundStart:Date.now(), lastPrice:null, resolved:false, resolveResult:null };
   _saveNifty5();
   _renderNifty5Widget();
 };
@@ -14732,25 +15176,46 @@ function renderHeatmap() {
   var _feedHidden = false;
   var _btn = null;
 
+  // ── Show/Hide button based on active page ──
+  window._mpSyncHideBtn = function() {
+    var btn = document.getElementById('_mpToggleFeedBtn');
+    if (!btn) return;
+    var isOnFeed = (window._activePage === 'feed' || window._activePage === '' || !window._activePage);
+    btn.style.display = isOnFeed ? 'block' : 'none';
+    // If we left the feed while panel was hidden, restore it
+    if (!isOnFeed && _feedHidden) {
+      _feedHidden = false;
+      var panels = document.querySelectorAll('.main-feed');
+      panels.forEach(function(p) {
+        p.style.opacity = '1'; p.style.transform = 'scaleY(1)'; p.style.pointerEvents = '';
+      });
+      var lsb = document.querySelector('.left-sidebar');
+      var rsb = document.querySelector('.right-sidebar');
+      [lsb, rsb].forEach(function(sb) { if (!sb) return; sb.style.opacity = '1'; sb.style.pointerEvents = ''; });
+    }
+  };
+
   window._mpToggleFeed = function() {
+    // Only works on Market Feed page
+    if (window._activePage && window._activePage !== 'feed' && window._activePage !== '') return;
+
     _btn = _btn || document.getElementById('_mpToggleFeedBtn');
     _feedHidden = !_feedHidden;
 
-    // Find the currently visible .main-feed panel
-    var panels = document.querySelectorAll('.main-feed');
-    panels.forEach(function(p) {
-      if (_feedHidden) {
-        p.style.transition = 'opacity 0.22s ease, transform 0.22s ease';
-        p.style.opacity = '0';
-        p.style.transform = 'scaleY(0.97)';
-        p.style.pointerEvents = 'none';
-      } else {
-        p.style.transition = 'opacity 0.22s ease, transform 0.22s ease';
-        p.style.opacity = '1';
-        p.style.transform = 'scaleY(1)';
-        p.style.pointerEvents = '';
-      }
-    });
+    // Only target the Market Feed panel (page-feed), not all .main-feed panels
+    var feedPanel = document.getElementById('page-feed');
+    if (!feedPanel) return;
+    if (_feedHidden) {
+      feedPanel.style.transition = 'opacity 0.22s ease, transform 0.22s ease';
+      feedPanel.style.opacity = '0';
+      feedPanel.style.transform = 'scaleY(0.97)';
+      feedPanel.style.pointerEvents = 'none';
+    } else {
+      feedPanel.style.transition = 'opacity 0.22s ease, transform 0.22s ease';
+      feedPanel.style.opacity = '1';
+      feedPanel.style.transform = 'scaleY(1)';
+      feedPanel.style.pointerEvents = '';
+    }
 
     // Also toggle sidebars visibility on desktop
     var lsb = document.querySelector('.left-sidebar');
