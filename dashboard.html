@@ -7408,12 +7408,38 @@ function renderVolumeShockers() {
   _vsFetchLive();
 }
 
-// ── Fetch live volume data via Yahoo Finance (proxy-safe) ─────────
+// ── Fetch live volume data via Yahoo Finance (multi-proxy fallback) ─
+const _VS_PROXIES = [
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${url}`,
+];
+
+async function _vsFetchWithFallback(url) {
+  for (const proxyFn of _VS_PROXIES) {
+    try {
+      const proxyUrl = proxyFn(url);
+      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(7000) });
+      if (!res.ok) continue;
+      const text = await res.text();
+      // allorigins wraps in {contents:...}, others return raw JSON
+      let parsed;
+      try { parsed = JSON.parse(text); } catch { continue; }
+      // allorigins wrapper
+      if (parsed && parsed.contents) {
+        try { parsed = JSON.parse(parsed.contents); } catch { continue; }
+      }
+      if (parsed?.quoteResponse?.result) return parsed;
+    } catch { /* try next proxy */ }
+  }
+  return null;
+}
+
 async function _vsFetchLive() {
   const body = document.getElementById('volumeShockersBody');
   if (!body) return;
   const now = Date.now();
-  // Return cached data if fresh
   if (_vsLiveData.length && (now - _vsLastFetch) < _VS_CACHE_MS) {
     _vsRenderTable();
     return;
@@ -7422,53 +7448,47 @@ async function _vsFetchLive() {
   _vsLoading = true;
   body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div class="loading-spin"></div><div style="margin-top:12px;font-size:12px;">Fetching live volume data…</div></div>';
 
-  // Batch symbols into groups of 10 (Yahoo Finance /v8/finance/spark can take multiples)
-  const syms = _VS_SYMBOLS.map(s => s.sym);
+  const syms    = _VS_SYMBOLS.map(s => s.sym);
   const nameMap = Object.fromEntries(_VS_SYMBOLS.map(s => [s.sym, s.name]));
-  const BATCH = 10;
+  const BATCH   = 10;
   const results = [];
 
   try {
     for (let i = 0; i < syms.length; i += BATCH) {
-      const batch = syms.slice(i, i + BATCH);
+      const batch  = syms.slice(i, i + BATCH);
       const joined = batch.join(',');
-      // Yahoo Finance v7 quote endpoint via allorigins proxy
-      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(joined)}&fields=regularMarketVolume,averageDailyVolume10Day,regularMarketPrice,regularMarketChangePercent,shortName`;
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-      try {
-        const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-        const wrapper = await res.json();
-        const data = JSON.parse(wrapper.contents || '{}');
-        const quotes = data?.quoteResponse?.result || [];
-        quotes.forEach(q => {
-          const todayVol = q.regularMarketVolume || 0;
-          const avgVol   = q.averageDailyVolume10Day || 1;
-          const ratio    = avgVol > 0 ? todayVol / avgVol : 0;
-          results.push({
-            sym:      q.symbol.replace('.NS',''),
-            name:     nameMap[q.symbol] || q.shortName || q.symbol.replace('.NS',''),
-            price:    q.regularMarketPrice || 0,
-            change1d: q.regularMarketChangePercent || 0,
-            todayVol,
-            avgVol,
-            ratio,
-            spike:    ratio >= 1.5,
-          });
+      const url    = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(joined)}&fields=regularMarketVolume,averageDailyVolume10Day,regularMarketPrice,regularMarketChangePercent,shortName`;
+      const data   = await _vsFetchWithFallback(url);
+      const quotes = data?.quoteResponse?.result || [];
+      quotes.forEach(q => {
+        const todayVol = q.regularMarketVolume || 0;
+        const avgVol   = q.averageDailyVolume10Day || 1;
+        const ratio    = avgVol > 0 ? todayVol / avgVol : 0;
+        results.push({
+          sym:      q.symbol.replace('.NS',''),
+          name:     nameMap[q.symbol] || q.shortName || q.symbol.replace('.NS',''),
+          price:    q.regularMarketPrice || 0,
+          change1d: q.regularMarketChangePercent || 0,
+          todayVol,
+          avgVol,
+          ratio,
+          spike:    ratio >= 1.5,
         });
-      } catch(batchErr) {
-        // batch failed, continue with next
-      }
-      // Small delay between batches to respect rate limits
-      if (i + BATCH < syms.length) await new Promise(r => setTimeout(r, 200));
+      });
+      if (i + BATCH < syms.length) await new Promise(r => setTimeout(r, 150));
     }
 
-    _vsLiveData = results;
-    _vsLastFetch = Date.now();
-    const upd = document.getElementById('vsLastUpdated');
-    if (upd) upd.textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
-    _vsRenderTable();
+    if (results.length > 0) {
+      _vsLiveData  = results;
+      _vsLastFetch = Date.now();
+      const upd = document.getElementById('vsLastUpdated');
+      if (upd) upd.textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
+      _vsRenderTable();
+    } else {
+      // All proxies failed — show meaningful error with retry
+      _vsFallbackStatic();
+    }
   } catch(err) {
-    // Fallback: use STATIC_TECH data with estimated volumes
     _vsFallbackStatic();
   } finally {
     _vsLoading = false;
@@ -11976,15 +11996,24 @@ function switchPredictTab(tab, btn) {
   renderPredict();
 }
 // ── PREDICTION LEADERBOARD DATA ──────────────────────────────────
-// Leaderboard is 100% user-derived — no dummy data.
+// Leaderboard is 100% user-derived — no dummy/fake data.
 // Each user's stats are recomputed from their real prediction history on every open.
 // localStorage key: mp_predictLb — array of { name, wins, bets, profit, streak, avatar, points, lastBetAt }
 var _predictLb = [];
-try {
-  var _lbRaw = JSON.parse(localStorage.getItem('mp_predictLb') || '[]');
-  // Strip any legacy dummy entries that have no real bets recorded
-  _predictLb = Array.isArray(_lbRaw) ? _lbRaw : [];
-} catch(e) { _predictLb = []; }
+(function _cleanLb() {
+  try {
+    var _lbRaw = JSON.parse(localStorage.getItem('mp_predictLb') || '[]');
+    if (!Array.isArray(_lbRaw)) { _predictLb = []; return; }
+    // Strip legacy/dummy entries: must have at least 1 real bet AND a lastBetAt timestamp
+    _predictLb = _lbRaw.filter(function(e) {
+      return e && typeof e.name === 'string' && e.name.trim().length > 0
+        && typeof e.bets === 'number' && e.bets > 0
+        && e.lastBetAt != null;
+    });
+    // Re-save cleaned list so stale entries don't persist
+    localStorage.setItem('mp_predictLb', JSON.stringify(_predictLb));
+  } catch(e) { _predictLb = []; }
+})();
 
 function _updateLbFromBets() {
   var u = (window.getUser && getUser()) || null;
@@ -12306,7 +12335,7 @@ function renderPredict() {
       +'<div style="font-size:9px;color:var(--green);font-weight:700;font-family:\'Space Mono\',monospace;">● LIVE</div></div>'
       + myBannerHtml
       + (_predictLb.length === 0
-        ? '<div style="text-align:center;padding:40px 16px;color:var(--text3);"><div style="font-size:36px;margin-bottom:12px;">🏆</div><div style="font-size:14px;font-weight:700;color:var(--text2);margin-bottom:6px;">No predictions resolved yet</div><div style="font-size:12px;">Place bets on Open Markets. Once markets resolve, your score appears here.</div></div>'
+        ? '<div style="text-align:center;padding:40px 16px;color:var(--text3);"><div style="font-size:36px;margin-bottom:12px;">🏆</div><div style="font-size:14px;font-weight:700;color:var(--text2);margin-bottom:6px;">No entries yet</div><div style="font-size:12px;line-height:1.6;">Leaderboard is live — only real users who placed bets show here.<br>Go to <b style="color:var(--accent);">Open Markets</b>, place a bet, and your rank appears once a market resolves.</div></div>'
         : '<div style="display:flex;gap:8px;margin-bottom:16px;align-items:flex-end;">' + topHtml + '</div>' + listHtml)
       +'<div style="text-align:center;padding:16px 0 4px;font-size:10px;color:var(--text3);">Points = wins × 100 + win_rate × 50 · Earlier predictions earn up to 2× bonus · Season resets monthly</div>';
   }
