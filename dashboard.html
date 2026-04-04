@@ -1376,15 +1376,7 @@ header {
       <button class="filter-btn"        data-mode="new"       onclick="setFeedMode(this,'new')">✨ New</button>
       <button class="filter-btn"        data-mode="following" onclick="setFeedMode(this,'following')">📌 Following</button>
     </div>
-    <div id="feedCategoryRow" style="padding:6px 16px 4px;border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;flex-shrink:0;scrollbar-width:none;">
-      <style>#feedCategoryRow::-webkit-scrollbar{display:none;}</style>
-      <button class="pcat-btn active-pcat" data-cat="" onclick="setFeedCat(this,'')">All</button>
-      <button class="pcat-btn" data-cat="Stocks"      onclick="setFeedCat(this,'Stocks')">🏦 Stocks</button>
-      <button class="pcat-btn" data-cat="Crypto"      onclick="setFeedCat(this,'Crypto')">₿ Crypto</button>
-      <button class="pcat-btn" data-cat="Commodities" onclick="setFeedCat(this,'Commodities')">🛢️ Commodities</button>
-      <button class="pcat-btn" data-cat="Macro"       onclick="setFeedCat(this,'Macro')">🌐 Macro</button>
-      <button class="pcat-btn" data-cat="Options"     onclick="setFeedCat(this,'Options')">📈 Options</button>
-    </div>
+    <!-- feedCategoryRow removed — categories already in left sidebar (Equities, Crypto, Commodities, Macro, Options Flow) -->
     <div class="feed-scroll">
       <div id="postsContainer"></div>
     </div>
@@ -1614,12 +1606,20 @@ header {
           <button id="vs_today"  onclick="setVSSort('today',this)"  style="padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-weight:700;font-size:11px;cursor:pointer;">Today Vol</button>
           <button id="vs_avg"    onclick="setVSSort('avg',this)"    style="padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-weight:700;font-size:11px;cursor:pointer;">Avg Vol</button>
         </div>
+        <!-- Min ratio filter — controls which symbols appear -->
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <div style="font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;">MIN RATIO</div>
+          <button id="vs_min_0"   onclick="setVSMinRatio(0)"   style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-weight:700;font-size:10px;cursor:pointer;">All</button>
+          <button id="vs_min_1"   onclick="setVSMinRatio(1.0)" style="padding:4px 10px;border-radius:6px;border:1px solid var(--accent);background:rgba(0,112,243,0.1);color:var(--accent);font-weight:700;font-size:10px;cursor:pointer;">≥1x</button>
+          <button id="vs_min_15"  onclick="setVSMinRatio(1.5)" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-weight:700;font-size:10px;cursor:pointer;">≥1.5x</button>
+          <button id="vs_min_2"   onclick="setVSMinRatio(2.0)" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-weight:700;font-size:10px;cursor:pointer;">≥2x</button>
+        </div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
           <span id="vsLastUpdated" style="font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;"></span>
           <button onclick="refreshVolumeShockers(true)" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text3);font-size:11px;font-weight:600;cursor:pointer;">↺ Refresh</button>
         </div>
       </div>
-      <!-- Table body -->
+      <!-- Table body — populated by renderVolumeShockers() -->
       <div class="feed-scroll" id="volumeShockersBody" style="padding:16px;"></div>
     </div>
     </div>
@@ -7301,7 +7301,8 @@ const CHART_PATTERNS = [
 ];
 
 // ── Volume Shockers ──────────────────────────────────────────────
-let _vsSortKey = 'ratio'; // 'ratio' | 'today' | 'avg'
+let _vsSortKey   = 'ratio'; // 'ratio' | 'today' | 'avg'
+let _vsMinRatio  = 1.0;     // minimum vol_ratio to show (1.0 = all elevated volume)
 
 function setVSSort(key, btn) {
   _vsSortKey = key;
@@ -7316,6 +7317,21 @@ function setVSSort(key, btn) {
   renderVolumeShockers();
 }
 
+// Allow toggling min ratio filter from UI buttons (vs_min_*)
+function setVSMinRatio(val) {
+  _vsMinRatio = val;
+  ['vs_min_0','vs_min_1','vs_min_15','vs_min_2'].forEach(id => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    const threshMap = { vs_min_0: 0, vs_min_1: 1.0, vs_min_15: 1.5, vs_min_2: 2.0 };
+    const active = threshMap[id] === val;
+    b.style.background  = active ? 'rgba(0,112,243,0.1)' : 'transparent';
+    b.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+    b.style.color       = active ? 'var(--accent)' : 'var(--text3)';
+  });
+  renderVolumeShockers();
+}
+
 function refreshVolumeShockers(force) {
   const el = document.getElementById('vsLastUpdated');
   if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
@@ -7326,32 +7342,38 @@ function renderVolumeShockers() {
   const body = document.getElementById('volumeShockersBody');
   if (!body) return;
 
+  // Show loading state briefly on first render
+  if (!body.innerHTML || body.innerHTML.trim() === '') {
+    body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div class="loading-spin"></div><div style="margin-top:12px;font-size:12px;">Loading volume data…</div></div>';
+  }
+
+  // Use STATIC_TECH as authoritative data source (always available, no async needed)
   const techData = (typeof STATIC_TECH !== 'undefined') ? STATIC_TECH : {};
   if (!Object.keys(techData).length) {
     body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚡</div><div style="font-size:14px;color:var(--text2);font-weight:600;">No volume data available</div><div style="font-size:12px;margin-top:6px;">Data will appear once markets are active</div></div>';
     return;
   }
 
-  // Pull all symbols from STATIC_TECH (the actual data store)
+  // Pull all symbols — filter by _vsMinRatio threshold (default 1.0 = at or above average volume)
   const rows = Object.entries(techData)
-    .filter(([, d]) => d.vol_ratio != null && d.vol_ratio > 0)
+    .filter(([, d]) => d.vol_ratio != null && d.vol_ratio >= _vsMinRatio)
     .map(([sym, d]) => {
       // Use live price if available, fallback to STATIC_TECH price — defensive access
       const lsArr = (typeof liveStocks !== 'undefined' && Array.isArray(liveStocks)) ? liveStocks : [];
       const live = lsArr.find(x => x && x.sym === sym) || {};
       const price = live.price || d.price || 100;
-      const change1d = live.chg != null ? live.chg : (d.change_1d != null ? d.change_1d : 0);
-      // Derive stable avg & today volumes from vol_ratio + price bucket
-      // Use a deterministic jitter seeded from symbol to avoid flicker on re-render
+      const change1d = (live.chg != null) ? live.chg : (d.change_1d != null ? d.change_1d : 0);
+      // Derive stable avg & today volumes from vol_ratio + price bucket.
+      // Deterministic jitter seeded from symbol name to avoid flicker on re-render.
       const seed = sym.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xffff, 0);
-      const jitter = 0.85 + (seed % 100) / 333; // stable 0.85–1.15
+      const jitter = 0.85 + (seed % 100) / 333; // stable range: 0.85–1.15
       const base = price > 5000 ? 500000 : price > 1000 ? 2000000 : price > 100 ? 5000000 : 10000000;
       const todayVol = Math.round(base * d.vol_ratio * jitter);
       const avgVol   = Math.round(todayVol / d.vol_ratio);
       return { sym, d: {...d, price, change_1d: change1d}, todayVol, avgVol };
     });
 
-  // Sort
+  // Sort by selected key
   rows.sort((a, b) => {
     if (_vsSortKey === 'ratio') return b.d.vol_ratio - a.d.vol_ratio;
     if (_vsSortKey === 'today') return b.todayVol - a.todayVol;
@@ -7359,14 +7381,17 @@ function renderVolumeShockers() {
   });
 
   if (!rows.length) {
-    body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚡</div><div style="font-size:14px;color:var(--text2);font-weight:600;">No volume shockers found</div><div style="font-size:12px;margin-top:6px;">Try lowering the minimum ratio filter</div></div>';
+    body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text3);"><div style="font-size:32px;margin-bottom:12px;">⚡</div><div style="font-size:14px;color:var(--text2);font-weight:600;">No volume shockers found</div><div style="font-size:12px;margin-top:6px;">Try lowering the minimum ratio filter below</div></div>';
     return;
   }
 
-  const fmtVol = v => v >= 1e7 ? (v/1e7).toFixed(2)+'Cr' : v >= 1e5 ? (v/1e5).toFixed(1)+'L' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v;
+  const fmtVol = v => v >= 1e7 ? (v/1e7).toFixed(2)+'Cr' : v >= 1e5 ? (v/1e5).toFixed(1)+'L' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : String(v);
   const chgColor = c => c >= 0 ? '#00a854' : '#ff3b3b';
 
   body.innerHTML = `
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px;font-family:'Space Mono',monospace;">
+      Showing <strong style="color:var(--text);">${rows.length}</strong> symbols with vol ratio ≥ ${_vsMinRatio}x
+    </div>
     <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'DM Sans',sans-serif;">
       <thead>
         <tr style="border-bottom:1px solid var(--border);color:var(--text3);font-size:10px;letter-spacing:.5px;font-family:'Space Mono',monospace;">
@@ -7384,14 +7409,14 @@ function renderVolumeShockers() {
           const ratio = d.vol_ratio;
           const ratioColor = ratio >= 2 ? '#ff6b35' : ratio >= 1.5 ? '#f5a623' : ratio >= 1.1 ? 'var(--accent)' : 'var(--text3)';
           const barW = Math.min(100, Math.round(ratio * 40));
-          return `<tr style="border-bottom:1px solid var(--border);transition:background .15s;" onmouseover="this.style.background='var(--hover)'" onmouseout="this.style.background='transparent'">
+          return `<tr style="border-bottom:1px solid var(--border);transition:background .15s;" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
             <td style="padding:8px 8px;">
-              <div style="font-weight:700;color:var(--text1);">${sym}</div>
+              <div style="font-weight:700;color:var(--text);">${sym}</div>
               ${d.vol_spike ? '<div style="font-size:9px;color:#ff6b35;margin-top:1px;">🔥 SPIKE</div>' : ''}
             </td>
-            <td style="text-align:right;padding:8px;color:var(--text1);font-weight:600;font-family:'Space Mono',monospace;">${d.price >= 1000 ? d.price.toLocaleString('en-IN') : d.price}</td>
-            <td style="text-align:right;padding:8px;font-weight:700;color:${chgColor(d.change_1d)};font-family:'Space Mono',monospace;">${d.change_1d >= 0 ? '+' : ''}${d.change_1d.toFixed(2)}%</td>
-            <td style="text-align:right;padding:8px;color:var(--text1);font-family:'Space Mono',monospace;">${fmtVol(todayVol)}</td>
+            <td style="text-align:right;padding:8px;color:var(--text);font-weight:600;font-family:'Space Mono',monospace;">${d.price >= 1000 ? Number(d.price).toLocaleString('en-IN') : d.price}</td>
+            <td style="text-align:right;padding:8px;font-weight:700;color:${chgColor(d.change_1d)};font-family:'Space Mono',monospace;">${d.change_1d >= 0 ? '+' : ''}${Number(d.change_1d).toFixed(2)}%</td>
+            <td style="text-align:right;padding:8px;color:var(--text);font-family:'Space Mono',monospace;">${fmtVol(todayVol)}</td>
             <td style="text-align:right;padding:8px;color:var(--text3);font-family:'Space Mono',monospace;">${fmtVol(avgVol)}</td>
             <td style="text-align:right;padding:8px;">
               <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
@@ -15182,16 +15207,16 @@ function renderHeatmap() {
     if (!btn) return;
     var isOnFeed = (window._activePage === 'feed' || window._activePage === '' || !window._activePage);
     btn.style.display = isOnFeed ? 'block' : 'none';
-    // If we left the feed while panel was hidden, restore it
+    // If we navigated away while panel was hidden, restore the feed panel
     if (!isOnFeed && _feedHidden) {
       _feedHidden = false;
-      var panels = document.querySelectorAll('.main-feed');
-      panels.forEach(function(p) {
-        p.style.opacity = '1'; p.style.transform = 'scaleY(1)'; p.style.pointerEvents = '';
-      });
-      var lsb = document.querySelector('.left-sidebar');
-      var rsb = document.querySelector('.right-sidebar');
-      [lsb, rsb].forEach(function(sb) { if (!sb) return; sb.style.opacity = '1'; sb.style.pointerEvents = ''; });
+      var feedPanel = document.getElementById('page-feed');
+      if (feedPanel) {
+        feedPanel.style.opacity = '1';
+        feedPanel.style.transform = 'scaleY(1)';
+        feedPanel.style.pointerEvents = '';
+      }
+      if (btn) { btn.textContent = '▲ Hide Panel'; btn.classList.remove('feed-hidden'); }
     }
   };
 
@@ -15202,7 +15227,7 @@ function renderHeatmap() {
     _btn = _btn || document.getElementById('_mpToggleFeedBtn');
     _feedHidden = !_feedHidden;
 
-    // Only target the Market Feed panel (page-feed), not all .main-feed panels
+    // Only target the center Market Feed panel (page-feed) — sidebars are NOT affected
     var feedPanel = document.getElementById('page-feed');
     if (!feedPanel) return;
     if (_feedHidden) {
@@ -15217,21 +15242,7 @@ function renderHeatmap() {
       feedPanel.style.pointerEvents = '';
     }
 
-    // Also toggle sidebars visibility on desktop
-    var lsb = document.querySelector('.left-sidebar');
-    var rsb = document.querySelector('.right-sidebar');
-    [lsb, rsb].forEach(function(sb) {
-      if (!sb) return;
-      if (_feedHidden) {
-        sb.style.transition = 'opacity 0.22s ease';
-        sb.style.opacity = '0.15';
-        sb.style.pointerEvents = 'none';
-      } else {
-        sb.style.opacity = '1';
-        sb.style.pointerEvents = '';
-      }
-    });
-
+    // Sidebars remain fully visible and interactive — only the feed panel is toggled
     if (_btn) {
       if (_feedHidden) {
         _btn.textContent = '▼ Show Panel';
