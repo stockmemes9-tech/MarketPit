@@ -2645,7 +2645,7 @@ const STATIC_TECH = {
 
 // ── STORAGE ──
 const getPosts    = () => { try { return JSON.parse(localStorage.getItem('mp_posts')||'[]'); } catch(e){return [];} };
-const savePosts   = p  => localStorage.setItem('mp_posts', JSON.stringify(p));
+const savePosts   = p  => { localStorage.setItem('mp_posts', JSON.stringify(p)); };
 const getUser     = () => { try { return JSON.parse(localStorage.getItem('mp_user')||'null'); } catch(e){return null;} };
 const saveUser    = u  => localStorage.setItem('mp_user', JSON.stringify(u));
 const getMsgs     = () => { try { return JSON.parse(localStorage.getItem('mp_chat')||'[]'); } catch(e){return [];} };
@@ -2658,6 +2658,11 @@ const saveVotes   = v  => localStorage.setItem('mp_votes', JSON.stringify(v));
 // Notifications queue
 const getNotifLog = () => { try { return JSON.parse(localStorage.getItem('mp_notiflog')||'[]'); } catch(e){return [];} };
 const saveNotifLog= n  => localStorage.setItem('mp_notiflog', JSON.stringify(n));
+// Expose to window for Firebase module script
+window.savePosts    = savePosts;
+window.saveComments = c => { localStorage.setItem('mp_comments', JSON.stringify(c)); };
+window.renderPosts       = () => typeof renderPosts       === 'function' && renderPosts();
+window.renderLeaderboard = () => typeof renderLeaderboard === 'function' && renderLeaderboard();
 
 // ── CRYPTO & COMMODITY SYMBOLS ──
 const CRYPTO_LIST = [
@@ -4339,14 +4344,14 @@ function votePost(postId, dir, btn) {
   p.likes = p.upvotes; // keep legacy compat
   saveVotes(votes);
   savePosts(posts);
+  _fbSaveVote(postId, p.upvotes, p.downvotes, p.likes).catch(()=>{});
   renderPosts();
   renderLeaderboard();
-  // Sync vote counts to shared store so all users see updated totals
-  _syncGlobalFeed().catch(() => {});
 }
 
 function deletePost(id) {
   savePosts(getPosts().filter(p=>p.id!==id));
+  _fbDeletePost(id).catch(()=>{});
   renderPosts(); renderLeaderboard();
 }
 
@@ -4401,17 +4406,17 @@ function submitComment() {
   if (!all[_activeCommentPostId]) all[_activeCommentPostId] = [];
   all[_activeCommentPostId].push({ id: Date.now(), author: user.name, text, time: new Date().toISOString() });
   saveComments(all);
+  _fbSaveComment(_activeCommentPostId, all[_activeCommentPostId][all[_activeCommentPostId].length-1]).catch(()=>{});
   input.value = '';
   input.style.height = 'auto';
   renderCommentsList();
   renderPosts(); // update comment count in feed
-  // Sync comment to shared store so all users see it
-  _syncGlobalFeed().catch(() => {});
 }
 
 function deleteComment(postId, commentId) {
   const all = getComments();
   if (all[postId]) { all[postId] = all[postId].filter(c => c.id !== commentId); saveComments(all); }
+  _fbDeleteComment(postId, commentId).catch(()=>{});
   renderCommentsList();
   renderPosts();
 }
@@ -11058,151 +11063,19 @@ function onLiveDataUpdate(){
   } catch(e) {}
 }
 
-// ── GLOBAL FEED SYNC — attempt to pull posts from backend API ──
-// ══════════════════════════════════════════════════════════════════
-// SHARED FEED — GitHub Contents API
-// posts.json lives directly in your repo. Reads are public (no auth).
-// Writes use a fine-grained PAT scoped only to this repo.
-//
-// ▶ SETUP (one-time, takes 2 minutes):
-//   1. Create  data/posts.json  in your repo with content: {"posts":[],"comments":{}}
-//   2. Go to GitHub → Settings → Developer settings → Personal access tokens
-//      → Fine-grained tokens → Generate new token
-//      · Repository access: only "AbheekPande/MarketPit"
-//      · Permissions → Contents → Read and Write
-//   3. Paste the token into _GH_TOKEN below.
-// ══════════════════════════════════════════════════════════════════
-const _GH_OWNER = 'AbheekPande';
-const _GH_REPO  = 'MarketPit';
-const _GH_FILE  = 'data/posts.json';
-const _GH_TOKEN = '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'; // fine-grained, Contents read+write only
+// ── GLOBAL FEED SYNC — Firebase Firestore ──
+// Delegates to window._fb* functions exposed by the module script below.
+async function _fbSavePost(post)                      { return window._fbSavePost    && window._fbSavePost(post); }
+async function _fbDeletePost(id)                      { return window._fbDeletePost  && window._fbDeletePost(id); }
+async function _fbSaveComment(postId, comment)        { return window._fbSaveComment && window._fbSaveComment(postId, comment); }
+async function _fbDeleteComment(postId, commentId)    { return window._fbDeleteComment && window._fbDeleteComment(postId, commentId); }
+async function _fbSaveVote(postId, up, down, likes)   { return window._fbSaveVote   && window._fbSaveVote(postId, up, down, likes); }
+async function _syncGlobalFeed()                      { return window._fbSyncFeed   && window._fbSyncFeed(); }
+function       _startRealtimeFeed()                   { window._fbStartRealtime     && window._fbStartRealtime(); }
 
-// Public raw URL — no auth, instant, CDN-cached (reads)
-const _GH_RAW_URL = `https://raw.githubusercontent.com/${_GH_OWNER}/${_GH_REPO}/main/${_GH_FILE}`;
-// GitHub Contents API URL (writes)
-const _GH_API_URL = `https://api.github.com/repos/${_GH_OWNER}/${_GH_REPO}/contents/${_GH_FILE}`;
-
-let _ghWritePending = false;
-let _ghWriteTimer   = null;
-let _ghFileSha      = null; // required by GitHub API for updates
-
-// ── Read via GitHub Contents API with raw accept header — bypasses CDN cache ──
-async function _sharedRead() {
-  try {
-    const r = await fetch(_GH_API_URL, {
-      headers: {
-        'Authorization': 'Bearer ' + _GH_TOKEN,
-        'Accept': 'application/vnd.github.v3.raw',
-        'Cache-Control': 'no-cache'
-      },
-      signal: AbortSignal.timeout(7000)
-    });
-    if (!r.ok) return null;
-    return await r.json();
-  } catch(e) { return null; }
-}
-
-// ── Write the shared store via GitHub Contents API (debounced 1 s) ──
-function _sharedWrite(data) {
-  if (_GH_TOKEN === 'PASTE_YOUR_PAT_HERE') return; // not configured yet
-  if (_ghWriteTimer) clearTimeout(_ghWriteTimer);
-  _ghWriteTimer = setTimeout(() => _ghDoWrite(data), 1000);
-}
-
-async function _ghDoWrite(data) {
-  if (_ghWritePending) {
-    // Re-queue — another write is in flight
-    _ghWriteTimer = setTimeout(() => _ghDoWrite(data), 1500);
-    return;
-  }
-  _ghWritePending = true;
-  try {
-    // Fetch the current SHA (needed for GitHub to accept the PUT)
-    if (!_ghFileSha) {
-      const meta = await fetch(_GH_API_URL, {
-        headers: { 'Authorization': 'Bearer ' + _GH_TOKEN },
-        signal: AbortSignal.timeout(6000)
-      });
-      if (meta.ok) {
-        const mj = await meta.json();
-        _ghFileSha = mj.sha;
-      }
-    }
-    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
-    const body = { message: 'feed: sync posts/votes/comments', content, sha: _ghFileSha };
-    const r = await fetch(_GH_API_URL, {
-      method: 'PUT',
-      headers: {
-        'Authorization': 'Bearer ' + _GH_TOKEN,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(12000)
-    });
-    if (r.ok) {
-      const rj = await r.json();
-      _ghFileSha = rj.content?.sha || null; // store new SHA for next write
-    } else if (r.status === 409) {
-      // Conflict — SHA is stale, clear it so next write re-fetches
-      _ghFileSha = null;
-    }
-  } catch(e) {}
-  _ghWritePending = false;
-}
-
-// ── Merge remote data into local, then push local additions back ──
-async function _syncGlobalFeed() {
-  const remote = await _sharedRead();
-  if (!remote) return; // network unavailable — local-only mode
-
-  // ── POSTS: merge remote into local (remote is source of truth for all users) ──
-  const localPosts  = getPosts();
-  const localIds    = new Set(localPosts.map(p => String(p.id)));
-  const remotePosts = Array.isArray(remote.posts) ? remote.posts : [];
-
-  // Pull in posts that exist remotely but not locally
-  const incoming = remotePosts.filter(p => !localIds.has(String(p.id)));
-
-  // Sync vote counts from remote into local posts so everyone sees same totals
-  const remoteById = Object.fromEntries(remotePosts.map(p => [String(p.id), p]));
-  const synced = localPosts.map(p => {
-    const rp = remoteById[String(p.id)];
-    if (!rp) return p;
-    // Take the higher vote count (prevents a sync from rolling back a fresh local vote)
-    return {
-      ...p,
-      upvotes:   Math.max(rp.upvotes   || 0, p.upvotes   || 0),
-      downvotes: Math.max(rp.downvotes || 0, p.downvotes || 0),
-      likes:     Math.max(rp.likes     || 0, p.likes     || 0),
-    };
-  });
-
-  const merged = [...synced, ...incoming].sort((a,b) => new Date(b.time)-new Date(a.time));
-  savePosts(merged.slice(0, 200)); // cap at 200 to stay within localStorage quota
-
-  // ── COMMENTS: merge remote comments, preserving local-only ones ──
-  const localComments  = getComments();
-  const remoteComments = (remote.comments && typeof remote.comments === 'object') ? remote.comments : {};
-  const mergedComments = { ...remoteComments };
-  Object.keys(localComments).forEach(pid => {
-    const localList  = localComments[pid]  || [];
-    const remoteList = remoteComments[pid] || [];
-    const remoteIds  = new Set(remoteList.map(c => String(c.id)));
-    const extra      = localList.filter(c => !remoteIds.has(String(c.id)));
-    if (extra.length) mergedComments[pid] = [...remoteList, ...extra];
-  });
-  saveComments(mergedComments);
-
-  renderPosts();
-  renderLeaderboard();
-
-  // Push merged state back to GitHub so others see the latest
-  _sharedWrite({ posts: merged.slice(0, 200), comments: mergedComments });
-}
-
-// ── Called after submitPost — post is already in localStorage, just sync ──
+// ── Called after submitPost ──
 async function _pushPostToApi(post) {
-  await _syncGlobalFeed();
+  await _fbSavePost(post);
 }
 
 // ── STARTUP — wait for DOM to be ready ──
@@ -11212,10 +11085,9 @@ function _mpInit() {
   renderTrendingTags();
   renderLeaderboard();
 
-  // ── Attempt to sync posts from backend API (global feed) ──
+  // ── Firebase real-time feed — all users see each other's posts instantly ──
   _syncGlobalFeed().catch(() => {});
-  // ── Poll every 30 s — users see each other's posts/comments without refreshing ──
-  setInterval(() => _syncGlobalFeed().catch(() => {}), 30000);
+  _startRealtimeFeed();
 
   // ── STEP 1: Render static prices INSTANTLY at frame 0 — UI is never blank ──
   STATIC_CRYPTO.forEach(s => { if (!liveStocks.find(x=>x.sym===s.sym)) liveStocks.push({...s, _live:false}); });
@@ -15580,6 +15452,119 @@ function renderHeatmap() {
     }
   };
 })();
+</script>
+
+<!-- ══════════════════════════════════════════════════════════════
+     FIREBASE FIRESTORE — shared posts, comments, votes (real-time)
+     ══════════════════════════════════════════════════════════════ -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import {
+  getFirestore, collection, doc, setDoc, getDocs,
+  onSnapshot, deleteDoc, serverTimestamp, query, orderBy, limit
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const _fbConfig = {
+  apiKey: "AIzaSyA5-vBPdHyuprfPvWek81YReWht0L416LA",
+  authDomain: "market-pit-d280b.firebaseapp.com",
+  projectId: "market-pit-d280b",
+  storageBucket: "market-pit-d280b.firebasestorage.app",
+  messagingSenderId: "794189995927",
+  appId: "1:794189995927:web:19ff92c879cd7af426aed2"
+};
+
+const _fbApp = initializeApp(_fbConfig);
+const _db    = getFirestore(_fbApp);
+
+const _postsCol      = ()       => collection(_db, 'posts');
+const _commentsCol   = (postId) => collection(_db, 'posts', String(postId), 'comments');
+const _votesCol      = ()       => collection(_db, 'votes');
+
+// ── Save post ──
+window._fbSavePost = async function(post) {
+  try {
+    await setDoc(doc(_db, 'posts', String(post.id)), { ...post, _ts: serverTimestamp() });
+  } catch(e) { console.warn('FB savePost:', e); }
+};
+
+// ── Delete post ──
+window._fbDeletePost = async function(postId) {
+  try { await deleteDoc(doc(_db, 'posts', String(postId))); } catch(e) {}
+};
+
+// ── Save comment ──
+window._fbSaveComment = async function(postId, comment) {
+  try {
+    await setDoc(doc(_db, 'posts', String(postId), 'comments', String(comment.id)), {
+      ...comment, _ts: serverTimestamp()
+    });
+  } catch(e) { console.warn('FB saveComment:', e); }
+};
+
+// ── Delete comment ──
+window._fbDeleteComment = async function(postId, commentId) {
+  try { await deleteDoc(doc(_db, 'posts', String(postId), 'comments', String(commentId))); } catch(e) {}
+};
+
+// ── Save vote ──
+window._fbSaveVote = async function(postId, upvotes, downvotes, likes) {
+  try { await setDoc(doc(_db, 'votes', String(postId)), { upvotes, downvotes, likes }); } catch(e) {}
+};
+
+// ── Full sync: fetch all posts + votes + comments ──
+window._fbSyncFeed = async function() {
+  try {
+    const q    = query(_postsCol(), orderBy('time', 'desc'), limit(200));
+    const snap = await getDocs(q);
+    const remotePosts = snap.docs.map(d => { const x = d.data(); delete x._ts; return x; });
+
+    const vSnap = await getDocs(_votesCol());
+    const remoteVotes = {};
+    vSnap.docs.forEach(d => { remoteVotes[d.id] = d.data(); });
+
+    const finalPosts = remotePosts.map(p => {
+      const v = remoteVotes[String(p.id)];
+      return v ? { ...p, upvotes: v.upvotes||0, downvotes: v.downvotes||0, likes: v.likes||0 } : p;
+    });
+
+    if (window.savePosts)    window.savePosts(finalPosts);
+
+    // Fetch comments for all posts
+    const allComments = {};
+    for (const p of finalPosts) {
+      const cSnap = await getDocs(_commentsCol(p.id));
+      if (!cSnap.empty) {
+        allComments[String(p.id)] = cSnap.docs
+          .map(d => { const x = d.data(); delete x._ts; return x; })
+          .sort((a,b) => new Date(a.time) - new Date(b.time));
+      }
+    }
+    if (window.saveComments) window.saveComments(allComments);
+
+    if (window.renderPosts)       window.renderPosts();
+    if (window.renderLeaderboard) window.renderLeaderboard();
+  } catch(e) { console.warn('FB syncFeed:', e); }
+};
+
+// ── Real-time listener ──
+let _unsub = null;
+window._fbStartRealtime = function() {
+  if (_unsub) _unsub();
+  const q = query(_postsCol(), orderBy('time', 'desc'), limit(200));
+  _unsub = onSnapshot(q, async (snap) => {
+    const remotePosts = snap.docs.map(d => { const x = d.data(); delete x._ts; return x; });
+    const vSnap = await getDocs(_votesCol());
+    const remoteVotes = {};
+    vSnap.docs.forEach(d => { remoteVotes[d.id] = d.data(); });
+    const finalPosts = remotePosts.map(p => {
+      const v = remoteVotes[String(p.id)];
+      return v ? { ...p, upvotes: v.upvotes||0, downvotes: v.downvotes||0, likes: v.likes||0 } : p;
+    });
+    if (window.savePosts)       window.savePosts(finalPosts);
+    if (window.renderPosts)     window.renderPosts();
+    if (window.renderLeaderboard) window.renderLeaderboard();
+  }, err => console.warn('FB realtime:', err));
+};
 </script>
 
 </body>
