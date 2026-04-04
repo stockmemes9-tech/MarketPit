@@ -11086,11 +11086,15 @@ let _ghWritePending = false;
 let _ghWriteTimer   = null;
 let _ghFileSha      = null; // required by GitHub API for updates
 
-// ── Read the shared store (public raw URL, no auth, fast) ──
+// ── Read via GitHub Contents API with raw accept header — bypasses CDN cache ──
 async function _sharedRead() {
   try {
-    // Cache-bust with timestamp so we always get the latest commit
-    const r = await fetch(_GH_RAW_URL + '?t=' + Math.floor(Date.now() / 10000), {
+    const r = await fetch(_GH_API_URL, {
+      headers: {
+        'Authorization': 'Bearer ' + _GH_TOKEN,
+        'Accept': 'application/vnd.github.v3.raw',
+        'Cache-Control': 'no-cache'
+      },
       signal: AbortSignal.timeout(7000)
     });
     if (!r.ok) return null;
@@ -11210,6 +11214,8 @@ function _mpInit() {
 
   // ── Attempt to sync posts from backend API (global feed) ──
   _syncGlobalFeed().catch(() => {});
+  // ── Poll every 30 s — users see each other's posts/comments without refreshing ──
+  setInterval(() => _syncGlobalFeed().catch(() => {}), 30000);
 
   // ── STEP 1: Render static prices INSTANTLY at frame 0 — UI is never blank ──
   STATIC_CRYPTO.forEach(s => { if (!liveStocks.find(x=>x.sym===s.sym)) liveStocks.push({...s, _live:false}); });
